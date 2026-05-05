@@ -85,6 +85,7 @@ async function saveHistory(history) {
   await put(CONFIG.blobKey, JSON.stringify(history, null, 2), {
     access: "private",
     addRandomSuffix: false,
+    allowOverwrite: true,
     contentType: "application/json",
   });
 }
