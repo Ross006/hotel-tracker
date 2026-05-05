@@ -107,13 +107,15 @@ async function sendSlack(message) {
 // ─── ROUTE HANDLER ────────────────────────────────────
 
 export async function GET(request) {
-  // Verify the request is from Vercel Cron or an authorized source
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
   const userAgent = request.headers.get("user-agent") || "";
   const isVercelCron = userAgent.includes("vercel-cron");
+  const referer = request.headers.get("referer") || "";
+  const host = request.headers.get("host") || "";
+  const isSameOrigin = referer.includes(host);
 
-  if (!isVercelCron && cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!isVercelCron && !isSameOrigin && cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return new Response("Unauthorized", { status: 401 });
   }
 
