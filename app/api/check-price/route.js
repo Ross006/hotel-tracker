@@ -91,7 +91,7 @@ async function saveHistory(history) {
 
 async function sendSlack(message) {
   const webhookUrl = process.env.SLACK_WEBHOOK_URL;
-  if (!webhookUrl) throw new Error("SLACK_WEBHOOK_URL not set");
+  if (!webhookUrl) return false;
 
   const res = await fetch(webhookUrl, {
     method: "POST",
@@ -100,8 +100,10 @@ async function sendSlack(message) {
   });
 
   if (!res.ok) {
-    throw new Error(`Slack webhook error: ${res.status}`);
+    console.warn(`Slack webhook error: ${res.status}`);
+    return false;
   }
+  return true;
 }
 
 // ─── ROUTE HANDLER ────────────────────────────────────
@@ -139,6 +141,7 @@ export async function GET(request) {
 
     const history = await loadHistory();
     const now = new Date().toISOString();
+    let slackSent = false;
 
     // Record this price
     history.prices.push({ price, date: now });
@@ -169,7 +172,7 @@ export async function GET(request) {
         `🔗 <https://www.hilton.com/en/hotels/ednchqq-the-caledonian-edinburgh/|Book here>`,
       ].join("\n");
 
-      await sendSlack(message);
+      slackSent = await sendSlack(message);
     }
 
     return Response.json({
@@ -180,7 +183,7 @@ export async function GET(request) {
       lowestEver: history.lowest,
       isNewLowest,
       totalChecks: allPrices.length,
-      slackSent: isNewLowest,
+      slackSent,
       timestamp: now,
     });
   } catch (error) {
