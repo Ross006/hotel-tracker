@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 
+const NIGHTS = ["2026-10-23", "2026-10-24", "2026-10-25"];
+const LABELS = { "2026-10-23": "Oct 23", "2026-10-24": "Oct 24", "2026-10-25": "Oct 25" };
+
 export default function PricesPage() {
   const [history, setHistory] = useState(null);
   const [usage, setUsage] = useState(null);
@@ -38,16 +41,25 @@ export default function PricesPage() {
     }
   }
 
-  const prices = history?.prices || [];
-  const sorted = [...prices].sort(
-    (a, b) => new Date(b.date) - new Date(a.date)
-  );
-  const lowest = history?.lowest;
-  const allPrices = prices.map((p) => p.price);
-  const highest = allPrices.length ? Math.max(...allPrices) : null;
-  const average = allPrices.length
-    ? allPrices.reduce((a, b) => a + b, 0) / allPrices.length
-    : null;
+  const nights = history?.nights || {};
+
+  // Build unified timeline: all unique timestamps across all nights
+  const allDates = new Set();
+  for (const key of NIGHTS) {
+    for (const entry of nights[key]?.prices || []) {
+      allDates.add(entry.date);
+    }
+  }
+  const timeline = [...allDates].sort((a, b) => new Date(b) - new Date(a));
+
+  // Build price lookup: { date -> { night -> price } }
+  const priceLookup = {};
+  for (const key of NIGHTS) {
+    for (const entry of nights[key]?.prices || []) {
+      if (!priceLookup[entry.date]) priceLookup[entry.date] = {};
+      priceLookup[entry.date][key] = entry.price;
+    }
+  }
 
   if (loading) {
     return (
@@ -62,7 +74,7 @@ export default function PricesPage() {
       <div style={s.header}>
         <div>
           <h1 style={s.heading}>The Caledonian Edinburgh</h1>
-          <p style={s.subtitle}>Oct 24 – 25, 2026 · Price History</p>
+          <p style={s.subtitle}>Price History · 3 nights tracked</p>
         </div>
         <button
           onClick={handleCheck}
@@ -86,19 +98,14 @@ export default function PricesPage() {
         >
           {checkResult.success ? (
             <span>
-              Got <strong>${checkResult.currentPrice?.toFixed(2)}</strong>
-              {checkResult.isNewLowest && " — new lowest! 🎉"}
+              Prices updated!
+              {checkResult.nights?.some((n) => n.isNewLowest) && " New lowest found! 🎉"}
               {checkResult.slackSent && " (Slack notified)"}
             </span>
           ) : (
-            <span>
-              Error: {checkResult.error || checkResult.message || "Unknown error"}
-            </span>
+            <span>Error: {checkResult.error || "Unknown error"}</span>
           )}
-          <button
-            onClick={() => setCheckResult(null)}
-            style={s.toastClose}
-          >
+          <button onClick={() => setCheckResult(null)} style={s.toastClose}>
             ✕
           </button>
         </div>
@@ -118,98 +125,100 @@ export default function PricesPage() {
             {usage.plan && (
               <span style={{ color: "#999" }}> · {usage.plan}</span>
             )}
+            <span style={{ color: "#999" }}> · 3 per check</span>
           </span>
         ) : null}
       </div>
 
-      {prices.length === 0 ? (
+      {/* Per-night stats */}
+      <div style={s.statsRow}>
+        {NIGHTS.map((key) => {
+          const data = nights[key];
+          const prices = data?.prices?.map((p) => p.price) || [];
+          const lowest = data?.lowest;
+          const latest = prices.length ? data.prices[data.prices.length - 1]?.price : null;
+          return (
+            <div key={key} style={s.stat}>
+              <div style={s.statLabel}>{LABELS[key]}</div>
+              {latest != null ? (
+                <>
+                  <div style={s.statValue}>${latest.toFixed(2)}</div>
+                  <div style={s.statMeta}>
+                    Low: ${lowest?.toFixed(2)} · {prices.length} checks
+                  </div>
+                </>
+              ) : (
+                <div style={{ ...s.statValue, color: "#ccc" }}>—</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {timeline.length === 0 ? (
         <p style={s.empty}>
-          No price data yet. Hit <strong>Check Now</strong> to run the first
-          check.
+          No price data yet. Hit <strong>Check Now</strong> to run the first check.
         </p>
       ) : (
-        <>
-          <div style={s.statsRow}>
-            <Stat label="Lowest" value={lowest} color="#16a34a" />
-            <Stat label="Average" value={average} color="#2563eb" />
-            <Stat label="Highest" value={highest} color="#dc2626" />
-            <Stat label="Checks" value={prices.length} plain />
-          </div>
-
-          <table style={s.table}>
-            <thead>
-              <tr>
-                <th style={{ ...s.th, textAlign: "left" }}>#</th>
-                <th style={{ ...s.th, textAlign: "left" }}>Date</th>
-                <th style={{ ...s.th, textAlign: "right" }}>Price</th>
-                <th style={{ ...s.th, textAlign: "right" }}>vs Lowest</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((entry, i) => {
-                const diff = entry.price - lowest;
-                const isLowest = entry.price === lowest;
-                return (
-                  <tr
-                    key={i}
-                    style={isLowest ? s.highlightRow : s.row}
-                  >
-                    <td style={{ ...s.td, color: "#999" }}>
-                      {prices.length - i}
-                    </td>
-                    <td style={s.td}>
-                      {new Date(entry.date).toLocaleDateString("en-GB", {
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td
-                      style={{
-                        ...s.td,
-                        textAlign: "right",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      ${entry.price.toFixed(2)}
-                    </td>
-                    <td
-                      style={{
-                        ...s.td,
-                        textAlign: "right",
-                        color: isLowest ? "#16a34a" : "#999",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {isLowest ? "★ lowest" : `+$${diff.toFixed(2)}`}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </>
+        <table style={s.table}>
+          <thead>
+            <tr>
+              <th style={{ ...s.th, textAlign: "left" }}>#</th>
+              <th style={{ ...s.th, textAlign: "left" }}>Date Checked</th>
+              {NIGHTS.map((key) => (
+                <th key={key} style={{ ...s.th, textAlign: "right" }}>
+                  {LABELS[key]}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {timeline.map((date, i) => {
+              const row = priceLookup[date] || {};
+              return (
+                <tr key={date} style={s.row}>
+                  <td style={{ ...s.td, color: "#999" }}>{timeline.length - i}</td>
+                  <td style={s.td}>
+                    {new Date(date).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </td>
+                  {NIGHTS.map((key) => {
+                    const price = row[key];
+                    const isLowest = price != null && price === nights[key]?.lowest;
+                    return (
+                      <td
+                        key={key}
+                        style={{
+                          ...s.td,
+                          textAlign: "right",
+                          fontVariantNumeric: "tabular-nums",
+                          background: isLowest ? "#f0fdf4" : "transparent",
+                          color: isLowest ? "#16a34a" : price != null ? "#111" : "#ccc",
+                          fontWeight: isLowest ? 600 : 400,
+                        }}
+                      >
+                        {price != null ? `$${price.toFixed(2)}` : "—"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value, color, plain }) {
-  return (
-    <div style={s.stat}>
-      <div style={s.statLabel}>{label}</div>
-      <div style={{ ...s.statValue, color: color || "#111" }}>
-        {plain ? value : `$${value.toFixed(2)}`}
-      </div>
     </div>
   );
 }
 
 const s = {
   container: {
-    maxWidth: 680,
+    maxWidth: 740,
     margin: "0 auto",
     padding: "2.5rem 1.5rem",
     fontFamily: "system-ui, -apple-system, sans-serif",
@@ -276,7 +285,12 @@ const s = {
     textAlign: "center",
   },
   statsRow: { display: "flex", gap: "1rem", marginBottom: "1.5rem" },
-  stat: { flex: 1, background: "#f8f9fa", borderRadius: 8, padding: "0.75rem 1rem" },
+  stat: {
+    flex: 1,
+    background: "#f8f9fa",
+    borderRadius: 8,
+    padding: "0.75rem 1rem",
+  },
   statLabel: {
     fontSize: "0.75rem",
     textTransform: "uppercase",
@@ -289,6 +303,11 @@ const s = {
     fontWeight: 700,
     fontVariantNumeric: "tabular-nums",
   },
+  statMeta: {
+    fontSize: "0.7rem",
+    color: "#999",
+    marginTop: 2,
+  },
   table: { width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" },
   th: {
     padding: "0.6rem 0.75rem",
@@ -300,5 +319,4 @@ const s = {
   },
   td: { padding: "0.6rem 0.75rem", borderBottom: "1px solid #f0f0f0" },
   row: {},
-  highlightRow: { background: "#f0fdf4" },
 };

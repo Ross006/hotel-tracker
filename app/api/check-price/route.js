@@ -3,8 +3,11 @@ import { put, list, get } from "@vercel/blob";
 // ─── CONFIG ───────────────────────────────────────────
 const CONFIG = {
   hotelQuery: "The Caledonian Edinburgh",
-  checkIn: "2026-10-24",
-  checkOut: "2026-10-25",
+  nights: [
+    { checkIn: "2026-10-23", checkOut: "2026-10-24", label: "Oct 23" },
+    { checkIn: "2026-10-24", checkOut: "2026-10-25", label: "Oct 24" },
+    { checkIn: "2026-10-25", checkOut: "2026-10-26", label: "Oct 25" },
+  ],
   adults: 2,
   currency: "USD",
   blobKey: "price-history.json",
@@ -12,12 +15,12 @@ const CONFIG = {
 
 // ─── HELPERS ──────────────────────────────────────────
 
-async function fetchPrice() {
+async function fetchPriceForNight(checkIn, checkOut) {
   const params = new URLSearchParams({
     engine: "google_hotels",
     q: CONFIG.hotelQuery,
-    check_in_date: CONFIG.checkIn,
-    check_out_date: CONFIG.checkOut,
+    check_in_date: checkIn,
+    check_out_date: checkOut,
     adults: String(CONFIG.adults),
     currency: CONFIG.currency,
     gl: "uk",
@@ -42,42 +45,35 @@ async function fetchPrice() {
       const priceStr =
         rate.lowest || rate.before_taxes_fees || rate.extracted_lowest || "";
 
-      // Handle both string ("$178") and number formats
       let price;
       if (typeof priceStr === "number") {
         price = priceStr;
       } else if (typeof priceStr === "string" && priceStr.length > 0) {
-        price = parseFloat(
-          priceStr.replace(/[$$€,]/g, "").trim()
-        );
+        price = parseFloat(priceStr.replace(/[$$€,]/g, "").trim());
       }
 
-      // Also check extracted_lowest (numeric field SerpApi sometimes provides)
       if ((!price || isNaN(price)) && rate.extracted_lowest) {
         price = rate.extracted_lowest;
       }
 
       if (price && !isNaN(price)) {
-        return { price, hotelName: prop.name, raw: data };
+        return { price, hotelName: prop.name };
       }
     }
   }
 
-  return { price: null, hotelName: null, raw: data };
+  return { price: null, hotelName: null };
 }
 
 async function loadHistory() {
   try {
-    // List blobs to find our history file
     const { blobs } = await list({ prefix: CONFIG.blobKey });
-    if (blobs.length === 0) {
-      return { prices: [], lowest: null, lowestDate: null };
-    }
+    if (blobs.length === 0) return { nights: {} };
 
     const blob = await get(blobs[0].url);
     return await blob.json();
   } catch {
-    return { prices: [], lowest: null, lowestDate: null };
+    return { nights: {} };
   }
 }
 
@@ -123,53 +119,71 @@ export async function GET(request) {
   }
 
   try {
-    const { price, hotelName, raw } = await fetchPrice();
-
-    if (!price) {
-      // Log what we got back for debugging
-      const propertyNames = (raw.properties || [])
-        .slice(0, 5)
-        .map((p) => p.name)
-        .join(", ");
-
-      return Response.json({
-        success: false,
-        message: "Hotel not found in results",
-        propertiesReturned: propertyNames,
-        timestamp: new Date().toISOString(),
-      });
-    }
+    const results = await Promise.all(
+      CONFIG.nights.map(async (night) => {
+        const { price, hotelName } = await fetchPriceForNight(night.checkIn, night.checkOut);
+        return { ...night, price, hotelName };
+      })
+    );
 
     const history = await loadHistory();
     const now = new Date().toISOString();
     let slackSent = false;
+    const nightResults = [];
+    const slackLines = [];
 
-    // Record this price
-    history.prices.push({ price, date: now });
+    for (const result of results) {
+      const key = result.checkIn;
 
-    // Compute stats
-    const allPrices = history.prices.map((p) => p.price);
-    const avgPrice = allPrices.reduce((a, b) => a + b, 0) / allPrices.length;
-    const prevLowest = history.lowest;
-    const isNewLowest = prevLowest === null || price < prevLowest;
+      if (!history.nights[key]) {
+        history.nights[key] = { prices: [], lowest: null, lowestDate: null };
+      }
 
-    if (isNewLowest) {
-      history.lowest = price;
-      history.lowestDate = now;
+      const nightHistory = history.nights[key];
+
+      if (result.price) {
+        nightHistory.prices.push({ price: result.price, date: now });
+
+        const allPrices = nightHistory.prices.map((p) => p.price);
+        const avgPrice = allPrices.reduce((a, b) => a + b, 0) / allPrices.length;
+        const prevLowest = nightHistory.lowest;
+        const isNewLowest = prevLowest === null || result.price < prevLowest;
+
+        if (isNewLowest) {
+          nightHistory.lowest = result.price;
+          nightHistory.lowestDate = now;
+          slackLines.push(
+            `> *${result.label}*: $${result.price.toFixed(2)} ← new low! (was ${prevLowest !== null ? `$${prevLowest.toFixed(2)}` : "N/A"})`
+          );
+        }
+
+        nightResults.push({
+          night: result.label,
+          checkIn: result.checkIn,
+          price: result.price,
+          average: Math.round(avgPrice * 100) / 100,
+          lowest: nightHistory.lowest,
+          isNewLowest,
+          totalChecks: allPrices.length,
+        });
+      } else {
+        nightResults.push({
+          night: result.label,
+          checkIn: result.checkIn,
+          price: null,
+          error: "Hotel not found in results",
+        });
+      }
     }
 
     await saveHistory(history);
 
-    // Send Slack message if new lowest
-    if (isNewLowest) {
+    if (slackLines.length > 0) {
       const message = [
-        `🏨 *New lowest price: The Caledonian Edinburgh — $${price.toFixed(2)}/night*`,
+        `🏨 *New lowest price found — The Caledonian Edinburgh*`,
         ``,
-        `> Current price:  $${price.toFixed(2)}`,
-        `> Previous lowest: ${prevLowest !== null ? `$${prevLowest.toFixed(2)}` : "N/A (first check)"}`,
-        `> Average price:  $${avgPrice.toFixed(2)} (over ${allPrices.length} checks)`,
+        ...slackLines,
         ``,
-        `📅 ${CONFIG.checkIn} → ${CONFIG.checkOut}`,
         `🔗 <https://www.hilton.com/en/hotels/ednchqq-the-caledonian-edinburgh/|Book here>`,
       ].join("\n");
 
@@ -178,12 +192,8 @@ export async function GET(request) {
 
     return Response.json({
       success: true,
-      hotel: hotelName,
-      currentPrice: price,
-      averagePrice: Math.round(avgPrice * 100) / 100,
-      lowestEver: history.lowest,
-      isNewLowest,
-      totalChecks: allPrices.length,
+      hotel: results.find((r) => r.hotelName)?.hotelName || CONFIG.hotelQuery,
+      nights: nightResults,
       slackSent,
       timestamp: now,
     });
