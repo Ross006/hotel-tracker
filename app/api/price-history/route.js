@@ -1,4 +1,4 @@
-import { list } from "@vercel/blob";
+import { list, get } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
 
@@ -8,8 +8,8 @@ export async function GET() {
     if (blobs.length === 0) {
       return Response.json({ prices: [], lowest: null, lowestDate: null });
     }
-    const res = await fetch(blobs[0].url, { cache: "no-store" });
-    const data = await res.json();
+    const blob = await get(blobs[0].url);
+    const data = await blob.json();
     return Response.json(data);
   } catch (error) {
     return Response.json(

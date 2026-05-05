@@ -1,4 +1,4 @@
-import { put, list } from "@vercel/blob";
+import { put, list, get } from "@vercel/blob";
 
 // ─── CONFIG ───────────────────────────────────────────
 const CONFIG = {
@@ -74,8 +74,8 @@ async function loadHistory() {
       return { prices: [], lowest: null, lowestDate: null };
     }
 
-    const res = await fetch(blobs[0].url);
-    return await res.json();
+    const blob = await get(blobs[0].url);
+    return await blob.json();
   } catch {
     return { prices: [], lowest: null, lowestDate: null };
   }
@@ -83,7 +83,7 @@ async function loadHistory() {
 
 async function saveHistory(history) {
   await put(CONFIG.blobKey, JSON.stringify(history, null, 2), {
-    access: "public",
+    access: "private",
     addRandomSuffix: false,
     contentType: "application/json",
   });
