@@ -5,21 +5,35 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const { blobs } = await list({ prefix: "price-history.json" });
+    console.log("Blob list result:", JSON.stringify(blobs.map(b => ({
+      url: b.url,
+      pathname: b.pathname,
+      downloadUrl: b.downloadUrl,
+      size: b.size,
+    }))));
+
     if (blobs.length === 0) {
       return Response.json({ nights: {}, debug: "no blobs found" });
     }
 
-    const res = await fetch(blobs[0].downloadUrl);
+    const blob = blobs[0];
+    const fetchUrl = blob.downloadUrl || blob.url;
+    console.log("Fetching from:", fetchUrl);
+
+    const res = await fetch(fetchUrl);
+    console.log("Fetch status:", res.status);
+
     if (!res.ok) {
+      const text = await res.text();
       return Response.json({
         nights: {},
-        debug: `fetch failed: ${res.status} ${res.statusText}`,
-        url: blobs[0].url,
+        debug: `fetch ${res.status}: ${text.slice(0, 200)}`,
+        blobInfo: { url: blob.url, downloadUrl: blob.downloadUrl, pathname: blob.pathname },
       });
     }
+
     const data = await res.json();
 
-    // Migrate old single-night format to multi-night
     if (data.prices && !data.nights) {
       return Response.json({
         nights: {
@@ -34,6 +48,7 @@ export async function GET() {
 
     return Response.json(data);
   } catch (error) {
+    console.error("Price history error:", error);
     return Response.json(
       { nights: {}, debug: `error: ${error.message}` },
       { status: 500 }
