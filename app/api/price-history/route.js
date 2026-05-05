@@ -18,6 +18,20 @@ export async function GET() {
       });
     }
     const data = await res.json();
+
+    // Migrate old single-night format to multi-night
+    if (data.prices && !data.nights) {
+      return Response.json({
+        nights: {
+          "2026-10-24": {
+            prices: data.prices,
+            lowest: data.lowest,
+            lowestDate: data.lowestDate,
+          },
+        },
+      });
+    }
+
     return Response.json(data);
   } catch (error) {
     return Response.json(

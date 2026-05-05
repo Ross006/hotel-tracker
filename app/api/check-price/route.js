@@ -71,7 +71,22 @@ async function loadHistory() {
     if (blobs.length === 0) return { nights: {} };
 
     const res = await fetch(blobs[0].downloadUrl);
-    return await res.json();
+    const data = await res.json();
+
+    // Migrate old single-night format to multi-night
+    if (data.prices && !data.nights) {
+      return {
+        nights: {
+          "2026-10-24": {
+            prices: data.prices,
+            lowest: data.lowest,
+            lowestDate: data.lowestDate,
+          },
+        },
+      };
+    }
+
+    return data;
   } catch {
     return { nights: {} };
   }
