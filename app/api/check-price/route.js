@@ -1,4 +1,5 @@
 import { put, list } from "@vercel/blob";
+import { Resend } from "resend";
 
 // ─── CONFIG ───────────────────────────────────────────
 const CONFIG = {
@@ -120,6 +121,60 @@ async function sendSlack(message) {
   return true;
 }
 
+async function sendEmail(nightResults) {
+  const apiKey = process.env.RESEND_API_KEY;
+  const emailTo = process.env.EMAIL_TO;
+  if (!apiKey || !emailTo) return false;
+
+  const resend = new Resend(apiKey);
+  const fromAddr = process.env.EMAIL_FROM || "Hotel Tracker <onboarding@resend.dev>";
+
+  const rows = nightResults
+    .map((n) => {
+      const priceCell = n.price != null ? `$${n.price.toFixed(2)}` : "N/A";
+      const lowestCell = n.lowest != null ? `$${n.lowest.toFixed(2)}` : "—";
+      const badge = n.isNewLowest ? ' <span style="color:#16a34a;font-weight:bold;">NEW LOW</span>' : "";
+      return `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #eee;">${n.night}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;font-weight:600;">${priceCell}${badge}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;color:#888;">${lowestCell}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const hasNewLow = nightResults.some((n) => n.isNewLowest);
+  const subject = hasNewLow
+    ? "🏨 New lowest price — The Caledonian Edinburgh"
+    : "🏨 Price update — The Caledonian Edinburgh";
+
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:500px;margin:0 auto;">
+      <h2 style="margin:0 0 4px;">The Caledonian Edinburgh</h2>
+      <p style="color:#666;margin:0 0 16px;font-size:14px;">Daily price check · Oct 23–25, 2026</p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;">
+        <thead>
+          <tr style="border-bottom:2px solid #e5e7eb;">
+            <th style="padding:8px 12px;text-align:left;color:#888;font-size:12px;text-transform:uppercase;">Night</th>
+            <th style="padding:8px 12px;text-align:right;color:#888;font-size:12px;text-transform:uppercase;">Price</th>
+            <th style="padding:8px 12px;text-align:right;color:#888;font-size:12px;text-transform:uppercase;">Lowest</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="margin:16px 0 0;font-size:13px;">
+        <a href="https://www.hilton.com/en/hotels/ednchqq-the-caledonian-edinburgh/" style="color:#2563eb;">Book here</a>
+      </p>
+    </div>`;
+
+  try {
+    await resend.emails.send({ from: fromAddr, to: emailTo, subject, html });
+    return true;
+  } catch (err) {
+    console.warn("Email send failed:", err.message);
+    return false;
+  }
+}
+
 // ─── ROUTE HANDLER ────────────────────────────────────
 
 export async function GET(request) {
@@ -195,6 +250,7 @@ export async function GET(request) {
 
     await saveHistory(history);
 
+    // Send notifications
     if (slackLines.length > 0) {
       const message = [
         `🏨 *New lowest price found — The Caledonian Edinburgh*`,
@@ -207,11 +263,14 @@ export async function GET(request) {
       slackSent = await sendSlack(message);
     }
 
+    const emailSent = await sendEmail(nightResults);
+
     return Response.json({
       success: true,
       hotel: results.find((r) => r.hotelName)?.hotelName || CONFIG.hotelQuery,
       nights: nightResults,
       slackSent,
+      emailSent,
       timestamp: now,
     });
   } catch (error) {
