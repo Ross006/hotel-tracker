@@ -1,4 +1,4 @@
-import { put, list, get } from "@vercel/blob";
+import { put, list } from "@vercel/blob";
 
 // ─── CONFIG ───────────────────────────────────────────
 const CONFIG = {
@@ -70,8 +70,8 @@ async function loadHistory() {
     const { blobs } = await list({ prefix: CONFIG.blobKey });
     if (blobs.length === 0) return { nights: {} };
 
-    const blob = await get(blobs[0].url);
-    return await blob.json();
+    const res = await fetch(blobs[0].downloadUrl);
+    return await res.json();
   } catch {
     return { nights: {} };
   }
