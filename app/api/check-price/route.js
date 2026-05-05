@@ -70,7 +70,9 @@ async function loadHistory() {
     const { blobs } = await list({ prefix: CONFIG.blobKey });
     if (blobs.length === 0) return { nights: {} };
 
-    const res = await fetch(blobs[0].downloadUrl);
+    const res = await fetch(blobs[0].url, {
+      headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+    });
     const data = await res.json();
 
     // Migrate old single-night format to multi-night

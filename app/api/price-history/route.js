@@ -17,10 +17,12 @@ export async function GET() {
     }
 
     const blob = blobs[0];
-    const fetchUrl = blob.downloadUrl || blob.url;
+    const fetchUrl = blob.url;
     console.log("Fetching from:", fetchUrl);
 
-    const res = await fetch(fetchUrl);
+    const res = await fetch(fetchUrl, {
+      headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+    });
     console.log("Fetch status:", res.status);
 
     if (!res.ok) {
