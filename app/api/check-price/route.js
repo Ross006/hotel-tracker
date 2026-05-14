@@ -96,7 +96,23 @@ async function loadHistory() {
       return { nights: {} };
     }
 
-    const res = await fetch(blobs[0].url, {
+    console.log(
+      `[check-price] loadHistory: ${blobs.length} blob(s) match prefix: ` +
+        JSON.stringify(
+          blobs.map((b) => ({ pathname: b.pathname, size: b.size, uploadedAt: b.uploadedAt }))
+        )
+    );
+
+    const exact = blobs.filter((b) => b.pathname === CONFIG.blobKey);
+    const pool = exact.length > 0 ? exact : blobs;
+    const blob = [...pool].sort(
+      (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
+    )[0];
+    console.log(
+      `[check-price] loadHistory: selected ${blob.pathname} (uploadedAt=${blob.uploadedAt}, size=${blob.size})`
+    );
+
+    const res = await fetch(blob.url, {
       headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
     });
     if (!res.ok) {
