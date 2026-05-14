@@ -23,11 +23,17 @@ export async function GET() {
       return Response.json({ nights: {}, debug: "no blobs found" });
     }
 
-    const blob = blobs[0];
+    const exact = blobs.find((b) => b.pathname === "price-history.json");
+    const blob =
+      exact ||
+      [...blobs].sort(
+        (a, b) => new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime()
+      )[0];
     const fetchUrl = blob.url;
     console.log("[price-history] fetching:", fetchUrl);
 
     const res = await fetch(fetchUrl, {
+      cache: "no-store",
       headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
     });
     console.log("[price-history] fetch status:", res.status);

@@ -139,7 +139,15 @@ async function loadHistory() {
       return { nights: {}, totalStay: { prices: [], lowest: null, lowestDate: null } };
     }
 
-    const res = await fetch(blobs[0].url, {
+    const exact = blobs.find((b) => b.pathname === CONFIG.blobKey);
+    const latest =
+      exact ||
+      [...blobs].sort(
+        (a, b) => new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime()
+      )[0];
+
+    const res = await fetch(latest.url, {
+      cache: "no-store",
       headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
     });
     if (!res.ok) {

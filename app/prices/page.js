@@ -15,9 +15,10 @@ export default function PricesPage() {
   const [debugResult, setDebugResult] = useState(null);
 
   const fetchData = useCallback(async () => {
+    const bust = `t=${Date.now()}`;
     const [histRes, usageRes] = await Promise.all([
-      fetch("/api/price-history"),
-      fetch("/api/serpapi-usage"),
+      fetch(`/api/price-history?${bust}`, { cache: "no-store" }),
+      fetch(`/api/serpapi-usage?${bust}`, { cache: "no-store" }),
     ]);
     setHistory(await histRes.json());
     setUsage(await usageRes.json());
