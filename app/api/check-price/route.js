@@ -39,6 +39,13 @@ async function fetchPriceForNight(checkIn, checkOut) {
   const data = await res.json();
   const properties = data.properties || [];
 
+  console.log(
+    `[check-price] ${checkIn} → ${checkOut}: ${properties.length} properties, ` +
+      `topLevelKeys=${Object.keys(data).join(",")}, ` +
+      `serpApiError=${data.error || "none"}, ` +
+      `names=${JSON.stringify(properties.slice(0, 10).map((p) => p.name))}`
+  );
+
   for (const prop of properties) {
     const name = (prop.name || "").toLowerCase();
     if (name.includes("caledonian") && name.includes("edinburgh")) {
@@ -57,12 +64,17 @@ async function fetchPriceForNight(checkIn, checkOut) {
         price = rate.extracted_lowest;
       }
 
+      console.log(
+        `[check-price] matched "${prop.name}" for ${checkIn}, rate=${JSON.stringify(rate)}, parsedPrice=${price}`
+      );
+
       if (price && !isNaN(price)) {
         return { price, hotelName: prop.name };
       }
     }
   }
 
+  console.log(`[check-price] no match for ${checkIn} (looked for "caledonian" + "edinburgh")`);
   return { price: null, hotelName: null };
 }
 
