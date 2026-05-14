@@ -2,28 +2,35 @@ import { list } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
 
+const BLOB_KEY = "price-history.json";
+
 export async function GET() {
   try {
-    const { blobs } = await list({ prefix: "price-history.json" });
-    console.log("Blob list result:", JSON.stringify(blobs.map(b => ({
-      url: b.url,
-      pathname: b.pathname,
-      downloadUrl: b.downloadUrl,
-      size: b.size,
-    }))));
+    const { blobs } = await list({ prefix: BLOB_KEY });
+    console.log(
+      `[price-history] ${blobs.length} blob(s) match prefix: ` +
+        JSON.stringify(
+          blobs.map((b) => ({ pathname: b.pathname, size: b.size, uploadedAt: b.uploadedAt }))
+        )
+    );
 
     if (blobs.length === 0) {
       return Response.json({ nights: {}, debug: "no blobs found" });
     }
 
-    const blob = blobs[0];
-    const fetchUrl = blob.url;
-    console.log("Fetching from:", fetchUrl);
+    const exact = blobs.filter((b) => b.pathname === BLOB_KEY);
+    const pool = exact.length > 0 ? exact : blobs;
+    const blob = [...pool].sort(
+      (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
+    )[0];
+    console.log(
+      `[price-history] selected ${blob.pathname} (uploadedAt=${blob.uploadedAt}, size=${blob.size})`
+    );
 
-    const res = await fetch(fetchUrl, {
+    const res = await fetch(blob.url, {
       headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
     });
-    console.log("Fetch status:", res.status);
+    console.log("[price-history] fetch status:", res.status);
 
     if (!res.ok) {
       const text = await res.text();
