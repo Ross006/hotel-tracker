@@ -151,15 +151,35 @@ async function fetchFlightPrice(config) {
   }
 
   let best = null;
+  let bestOption = null;
   for (const option of options) {
     const p = parseFlightPrice(option?.price);
     if (p != null && (best === null || p < best)) {
       best = p;
+      bestOption = option;
     }
   }
+
+  const flights = Array.isArray(bestOption?.flights) ? bestOption.flights : [];
+  const firstLeg = flights[0];
+  const lastLeg = flights[flights.length - 1];
+  const carriers = [...new Set(flights.map((f) => f?.airline).filter(Boolean))];
+  const details = bestOption
+    ? {
+        carriers,
+        segments: flights.length || null,
+        durationMinutes: bestOption?.total_duration ?? null,
+        departureTime: firstLeg?.departure_airport?.time || null,
+        arrivalTime: lastLeg?.arrival_airport?.time || null,
+        stopCount: Math.max(0, (flights.length || 1) - 1),
+        bookingToken:
+          typeof bestOption?.booking_token === "string" ? bestOption.booking_token : null,
+      }
+    : null;
   return {
     price: best,
     rawCount: options.length,
+    details,
   };
 }
 
@@ -415,7 +435,7 @@ export async function GET(request) {
 
     const flightResult = flightEnabled
       ? await fetchFlightPrice(tripConfig)
-      : { price: null, rawCount: 0 };
+      : { price: null, rawCount: 0, details: null };
 
     const history = await loadHistory();
     const now = new Date().toISOString();
@@ -520,7 +540,11 @@ export async function GET(request) {
       totalChecks: history.flight?.prices?.length ?? 0,
     };
     if (flightResult.price != null) {
-      history.flight.prices.push({ price: flightResult.price, date: now });
+      history.flight.prices.push({
+        price: flightResult.price,
+        date: now,
+        details: flightResult.details,
+      });
       const fares = history.flight.prices.map((p) => p.price);
       const prevLowest = history.flight.lowest;
       const isNewLowest = prevLowest === null || flightResult.price < prevLowest;
@@ -534,6 +558,7 @@ export async function GET(request) {
         lowest: history.flight.lowest,
         isNewLowest,
         totalChecks: fares.length,
+        details: flightResult.details,
       };
       if (isNewLowest) {
         slackLines.push(
@@ -630,6 +655,7 @@ export async function GET(request) {
         route: `${tripConfig.flight.origin}-${tripConfig.flight.destination}`,
         ...flightSummary,
         rawCount: flightResult.rawCount,
+        details: flightResult.details,
       },
       combined: combinedSummary,
       bookingSignal,

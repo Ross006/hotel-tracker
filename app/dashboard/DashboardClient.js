@@ -72,6 +72,7 @@ export default function DashboardClient() {
     current: history?.flight?.prices?.at?.(-1)?.price ?? null,
     lowest: history?.flight?.lowest ?? null,
     totalChecks: history?.flight?.prices?.length ?? 0,
+    details: history?.flight?.prices?.at?.(-1)?.details ?? null,
   };
   const combined = checkResult?.combined || {
     current: history?.combined?.prices?.at?.(-1)?.price ?? null,
@@ -170,9 +171,71 @@ export default function DashboardClient() {
         </div>
       )}
 
+      {(history?.flight?.prices?.length || 0) > 0 && (
+        <>
+          <h2 style={s.sectionTitle}>Flight History</h2>
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={{ ...s.th, textAlign: "left" }}>#</th>
+                <th style={{ ...s.th, textAlign: "left" }}>Date Checked</th>
+                <th style={{ ...s.th, textAlign: "right" }}>Price</th>
+                <th style={{ ...s.th, textAlign: "left" }}>Carriers</th>
+                <th style={{ ...s.th, textAlign: "right" }}>Stops</th>
+                <th style={{ ...s.th, textAlign: "right" }}>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...(history?.flight?.prices || [])]
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .map((entry, i) => {
+                  const isLowest = entry.price === history?.flight?.lowest;
+                  return (
+                    <tr key={`${entry.date}-${i}`}>
+                      <td style={s.td}>{(history?.flight?.prices?.length || 0) - i}</td>
+                      <td style={s.td}>
+                        {new Date(entry.date).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td
+                        style={{
+                          ...s.td,
+                          textAlign: "right",
+                          color: isLowest ? "#16a34a" : "#111",
+                          fontWeight: isLowest ? 700 : 500,
+                        }}
+                      >
+                        {fmt(entry.price)}
+                      </td>
+                      <td style={s.td}>
+                        {entry.details?.carriers?.length
+                          ? entry.details.carriers.join(", ")
+                          : "—"}
+                      </td>
+                      <td style={{ ...s.td, textAlign: "right" }}>
+                        {entry.details?.stopCount != null ? entry.details.stopCount : "—"}
+                      </td>
+                      <td style={{ ...s.td, textAlign: "right" }}>
+                        {fmtMinutes(entry.details?.durationMinutes)}
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </>
+      )}
+
       {timeline.length === 0 ? (
         <p style={s.empty}>No hotel history yet. Run a check to populate data.</p>
       ) : (
+        <>
+        <h2 style={s.sectionTitle}>Hotel Nightly History</h2>
         <table style={s.table}>
           <thead>
             <tr>
@@ -221,6 +284,7 @@ export default function DashboardClient() {
             })}
           </tbody>
         </table>
+        </>
       )}
     </div>
   );
@@ -238,6 +302,14 @@ function Stat({ title, current, low, checks }) {
 
 function fmt(v) {
   return v == null ? "—" : `$${Number(v).toFixed(2)}`;
+}
+
+function fmtMinutes(v) {
+  if (v == null || !Number.isFinite(Number(v))) return "—";
+  const mins = Number(v);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}h ${m}m`;
 }
 
 function computeBookingSignal(current, lowest) {
@@ -352,6 +424,7 @@ const s = {
   statValue: { fontSize: "1.35rem", fontWeight: 700 },
   statMeta: { fontSize: "0.78rem", color: "#666" },
   empty: { background: "#f5f5f5", borderRadius: 8, padding: "1rem", color: "#777" },
+  sectionTitle: { margin: "0.75rem 0 0.5rem", fontSize: "1rem" },
   table: { width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" },
   th: {
     borderBottom: "2px solid #e5e7eb",
