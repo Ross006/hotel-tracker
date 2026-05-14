@@ -1,16 +1,10 @@
 import { put, list } from "@vercel/blob";
 import { Resend } from "resend";
+import { getNightRanges } from "../../../lib/trip-config";
+import { loadTripConfig } from "../../../lib/trip-config-store";
 
 // ─── CONFIG ───────────────────────────────────────────
 const CONFIG = {
-  hotelQuery: "The Caledonian Edinburgh",
-  nights: [
-    { checkIn: "2026-10-23", checkOut: "2026-10-24", label: "Oct 23" },
-    { checkIn: "2026-10-24", checkOut: "2026-10-25", label: "Oct 24" },
-    { checkIn: "2026-10-25", checkOut: "2026-10-26", label: "Oct 25" },
-  ],
-  adults: 2,
-  currency: "USD",
   blobKey: "price-history.json",
 };
 
@@ -61,14 +55,14 @@ function computeBookingSignal(current, lowest) {
 
 // ─── HELPERS ──────────────────────────────────────────
 
-async function fetchPriceForNight(checkIn, checkOut) {
+async function fetchHotelPriceForNight(config, checkIn, checkOut) {
   const params = new URLSearchParams({
     engine: "google_hotels",
-    q: CONFIG.hotelQuery,
+    q: config.hotel.query,
     check_in_date: checkIn,
     check_out_date: checkOut,
-    adults: String(CONFIG.adults),
-    currency: CONFIG.currency,
+    adults: String(config.hotel.adults),
+    currency: config.hotel.currency,
     gl: "uk",
     hl: "en",
     api_key: process.env.SERPAPI_API_KEY,
@@ -116,6 +110,59 @@ async function fetchPriceForNight(checkIn, checkOut) {
   return { price: null, hotelName: null };
 }
 
+async function fetchFlightPrice(config) {
+  const params = new URLSearchParams({
+    engine: "google_flights",
+    departure_id: config.flight.origin,
+    arrival_id: config.flight.destination,
+    outbound_date: config.flight.departDate,
+    return_date: config.flight.returnDate,
+    adults: String(config.flight.adults),
+    currency: config.flight.currency,
+    travel_class:
+      config.flight.cabin === "BUSINESS"
+        ? "2"
+        : config.flight.cabin === "FIRST"
+          ? "4"
+          : "1",
+    hl: "en",
+    gl: "us",
+    api_key: process.env.SERPAPI_API_KEY,
+  });
+
+  const res = await fetch(`https://serpapi.com/search.json?${params.toString()}`, {
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new Error(`SerpApi flight error: ${res.status} ${res.statusText}`);
+  }
+  const data = await res.json();
+  const options = [
+    ...(Array.isArray(data.best_flights) ? data.best_flights : []),
+    ...(Array.isArray(data.other_flights) ? data.other_flights : []),
+  ];
+  function parseFlightPrice(value) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const n = Number(value.replace(/[$,]/g, "").trim());
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+
+  let best = null;
+  for (const option of options) {
+    const p = parseFlightPrice(option?.price);
+    if (p != null && (best === null || p < best)) {
+      best = p;
+    }
+  }
+  return {
+    price: best,
+    rawCount: options.length,
+  };
+}
+
 function parseRate(rate) {
   if (!rate) return null;
   const priceStr = rate.lowest || rate.before_taxes_fees || rate.extracted_lowest || "";
@@ -136,7 +183,12 @@ async function loadHistory() {
     const { blobs } = await list({ prefix: CONFIG.blobKey });
     if (blobs.length === 0) {
       console.log("[check-price] loadHistory: no blob found, starting fresh");
-      return { nights: {}, totalStay: { prices: [], lowest: null, lowestDate: null } };
+      return {
+        hotelNights: {},
+        hotelStay: { prices: [], lowest: null, lowestDate: null },
+        flight: { prices: [], lowest: null, lowestDate: null },
+        combined: { prices: [], lowest: null, lowestDate: null },
+      };
     }
 
     const exact = blobs.find((b) => b.pathname === CONFIG.blobKey);
@@ -159,25 +211,30 @@ async function loadHistory() {
     }
     const data = await res.json();
 
-    if (data.prices && !data.nights) {
+    if (data.prices && !data.nights && !data.hotelNights) {
       console.log("[check-price] loadHistory: migrating single-night format");
       return {
-        nights: {
+        hotelNights: {
           "2026-10-24": {
             prices: data.prices,
             lowest: data.lowest,
             lowestDate: data.lowestDate,
           },
         },
-        totalStay: { prices: [], lowest: null, lowestDate: null },
+        hotelStay: { prices: [], lowest: null, lowestDate: null },
+        flight: { prices: [], lowest: null, lowestDate: null },
+        combined: { prices: [], lowest: null, lowestDate: null },
       };
     }
 
-    if (!data.totalStay) {
-      data.totalStay = { prices: [], lowest: null, lowestDate: null };
-    }
+    if (data.nights && !data.hotelNights) data.hotelNights = data.nights;
+    if (data.totalStay && !data.hotelStay) data.hotelStay = data.totalStay;
+    if (!data.hotelNights) data.hotelNights = {};
+    if (!data.hotelStay) data.hotelStay = { prices: [], lowest: null, lowestDate: null };
+    if (!data.flight) data.flight = { prices: [], lowest: null, lowestDate: null };
+    if (!data.combined) data.combined = { prices: [], lowest: null, lowestDate: null };
 
-    const summary = Object.entries(data.nights || {}).map(
+    const summary = Object.entries(data.hotelNights || {}).map(
       ([k, v]) => `${k}=${v.prices?.length ?? 0}`
     );
     console.log(`[check-price] loadHistory: loaded ${summary.join(", ") || "(empty)"}`);
@@ -189,10 +246,10 @@ async function loadHistory() {
 }
 
 async function saveHistory(history) {
-  const summary = Object.entries(history.nights || {}).map(
+  const summary = Object.entries(history.hotelNights || {}).map(
     ([k, v]) => `${k}=${v.prices?.length ?? 0}`
   );
-  const totalCount = history.totalStay?.prices?.length ?? 0;
+  const totalCount = history.hotelStay?.prices?.length ?? 0;
   console.log(
     `[check-price] saveHistory: writing ${summary.join(", ") || "(empty)"} totalStay=${totalCount}`
   );
@@ -222,7 +279,7 @@ async function sendSlack(message) {
   return true;
 }
 
-async function sendEmail(nightResults, summary) {
+async function sendEmail(nightResults, summary, tripConfig, flightSummary) {
   const apiKey = process.env.RESEND_API_KEY;
   const emailTo = process.env.EMAIL_TO;
   if (!apiKey || !emailTo) return false;
@@ -243,20 +300,38 @@ async function sendEmail(nightResults, summary) {
     })
     .join("");
 
-  const hasNewLow = nightResults.some((n) => n.isNewLowest);
+  const hasNewLow =
+    nightResults.some((n) => n.isNewLowest) ||
+    Boolean(summary?.hotelStay?.isNewLowest) ||
+    Boolean(flightSummary?.isNewLowest) ||
+    Boolean(summary?.combined?.isNewLowest);
   const hasTargetHit = summary?.targetAlert?.met;
   const subject = hasNewLow
-    ? "🏨 New lowest price — The Caledonian Edinburgh"
+    ? `🏨 New lowest price — ${tripConfig.hotel.query}`
     : hasTargetHit
-      ? "🏨 Target price hit — The Caledonian Edinburgh"
-      : "🏨 Price update — The Caledonian Edinburgh";
+      ? `🏨 Target price hit — ${tripConfig.hotel.query}`
+      : `🏨 Price update — ${tripConfig.hotel.query}`;
 
   const totalStayLine =
-    summary?.totalStay?.current != null
-      ? `<p style="margin:0 0 8px;font-size:14px;"><strong>Total stay:</strong> $${summary.totalStay.current.toFixed(
+    summary?.hotelStay?.current != null
+      ? `<p style="margin:0 0 8px;font-size:14px;"><strong>Hotel stay:</strong> $${summary.hotelStay.current.toFixed(
           2
         )} (best: ${
-          summary.totalStay.lowest != null ? `$${summary.totalStay.lowest.toFixed(2)}` : "N/A"
+          summary.hotelStay.lowest != null ? `$${summary.hotelStay.lowest.toFixed(2)}` : "N/A"
+        })</p>`
+      : "";
+  const flightLine =
+    flightSummary?.current != null
+      ? `<p style="margin:0 0 8px;font-size:14px;"><strong>Flights:</strong> $${flightSummary.current.toFixed(
+          2
+        )} (best: ${flightSummary.lowest != null ? `$${flightSummary.lowest.toFixed(2)}` : "N/A"})</p>`
+      : "";
+  const combinedLine =
+    summary?.combined?.current != null
+      ? `<p style="margin:0 0 8px;font-size:14px;"><strong>Combined trip:</strong> $${summary.combined.current.toFixed(
+          2
+        )} (best: ${
+          summary.combined.lowest != null ? `$${summary.combined.lowest.toFixed(2)}` : "N/A"
         })</p>`
       : "";
   const signalLine = summary?.bookingSignal?.label
@@ -273,9 +348,11 @@ async function sendEmail(nightResults, summary) {
 
   const html = `
     <div style="font-family:system-ui,sans-serif;max-width:500px;margin:0 auto;">
-      <h2 style="margin:0 0 4px;">The Caledonian Edinburgh</h2>
-      <p style="color:#666;margin:0 0 16px;font-size:14px;">Daily price check · Oct 23–25, 2026</p>
+      <h2 style="margin:0 0 4px;">${tripConfig.hotel.query}</h2>
+      <p style="color:#666;margin:0 0 16px;font-size:14px;">Trip check update</p>
       ${totalStayLine}
+      ${flightLine}
+      ${combinedLine}
       ${signalLine}
       ${targetLine}
       <table style="width:100%;border-collapse:collapse;font-size:14px;">
@@ -289,7 +366,7 @@ async function sendEmail(nightResults, summary) {
         <tbody>${rows}</tbody>
       </table>
       <p style="margin:16px 0 0;font-size:13px;">
-        <a href="https://www.hilton.com/en/hotels/ednchqq-the-caledonian-edinburgh/" style="color:#2563eb;">Book here</a>
+        <a href="https://www.google.com/travel/flights" style="color:#2563eb;">Check flights</a>
       </p>
     </div>`;
 
@@ -318,12 +395,27 @@ export async function GET(request) {
   }
 
   try {
-    const results = await Promise.all(
-      CONFIG.nights.map(async (night) => {
-        const { price, hotelName } = await fetchPriceForNight(night.checkIn, night.checkOut);
-        return { ...night, price, hotelName };
-      })
-    );
+    const tripConfig = await loadTripConfig();
+    const nights = getNightRanges(tripConfig.hotel.checkIn, tripConfig.hotel.checkOut);
+    const hotelEnabled = tripConfig.hotel.enabled !== false;
+    const flightEnabled = tripConfig.flight.enabled !== false;
+
+    const results = hotelEnabled
+      ? await Promise.all(
+          nights.map(async (night) => {
+            const { price, hotelName } = await fetchHotelPriceForNight(
+              tripConfig,
+              night.checkIn,
+              night.checkOut
+            );
+            return { ...night, price, hotelName };
+          })
+        )
+      : [];
+
+    const flightResult = flightEnabled
+      ? await fetchFlightPrice(tripConfig)
+      : { price: null, rawCount: 0 };
 
     const history = await loadHistory();
     const now = new Date().toISOString();
@@ -334,11 +426,11 @@ export async function GET(request) {
     for (const result of results) {
       const key = result.checkIn;
 
-      if (!history.nights[key]) {
-        history.nights[key] = { prices: [], lowest: null, lowestDate: null };
+      if (!history.hotelNights[key]) {
+        history.hotelNights[key] = { prices: [], lowest: null, lowestDate: null };
       }
 
-      const nightHistory = history.nights[key];
+      const nightHistory = history.hotelNights[key];
 
       if (result.price) {
         nightHistory.prices.push({ price: result.price, date: now });
@@ -386,28 +478,28 @@ export async function GET(request) {
     let totalStaySummary = {
       current: null,
       average: null,
-      lowest: history.totalStay?.lowest ?? null,
+      lowest: history.hotelStay?.lowest ?? null,
       isNewLowest: false,
-      totalChecks: history.totalStay?.prices?.length ?? 0,
+      totalChecks: history.hotelStay?.prices?.length ?? 0,
     };
 
-    if (completeNightPrices.length === CONFIG.nights.length) {
+    if (completeNightPrices.length > 0 && completeNightPrices.length === nights.length) {
       const total = completeNightPrices.reduce((a, b) => a + b, 0);
-      if (!history.totalStay) {
-        history.totalStay = { prices: [], lowest: null, lowestDate: null };
+      if (!history.hotelStay) {
+        history.hotelStay = { prices: [], lowest: null, lowestDate: null };
       }
-      history.totalStay.prices.push({ price: total, date: now });
-      const totals = history.totalStay.prices.map((p) => p.price);
-      const prevLowestTotal = history.totalStay.lowest;
+      history.hotelStay.prices.push({ price: total, date: now });
+      const totals = history.hotelStay.prices.map((p) => p.price);
+      const prevLowestTotal = history.hotelStay.lowest;
       const isNewLowestTotal = prevLowestTotal === null || total < prevLowestTotal;
       if (isNewLowestTotal) {
-        history.totalStay.lowest = total;
-        history.totalStay.lowestDate = now;
+        history.hotelStay.lowest = total;
+        history.hotelStay.lowestDate = now;
       }
       totalStaySummary = {
         current: total,
         average: Math.round((totals.reduce((a, b) => a + b, 0) / totals.length) * 100) / 100,
-        lowest: history.totalStay.lowest,
+        lowest: history.hotelStay.lowest,
         isNewLowest: isNewLowestTotal,
         totalChecks: totals.length,
       };
@@ -420,18 +512,83 @@ export async function GET(request) {
       }
     }
 
-    const bookingSignal = computeBookingSignal(
-      totalStaySummary.current,
-      totalStaySummary.lowest
-    );
-    const targetTotal = parseNumberEnv(process.env.TARGET_TOTAL_PRICE);
+    let flightSummary = {
+      current: null,
+      average: null,
+      lowest: history.flight?.lowest ?? null,
+      isNewLowest: false,
+      totalChecks: history.flight?.prices?.length ?? 0,
+    };
+    if (flightResult.price != null) {
+      history.flight.prices.push({ price: flightResult.price, date: now });
+      const fares = history.flight.prices.map((p) => p.price);
+      const prevLowest = history.flight.lowest;
+      const isNewLowest = prevLowest === null || flightResult.price < prevLowest;
+      if (isNewLowest) {
+        history.flight.lowest = flightResult.price;
+        history.flight.lowestDate = now;
+      }
+      flightSummary = {
+        current: flightResult.price,
+        average: Math.round((fares.reduce((a, b) => a + b, 0) / fares.length) * 100) / 100,
+        lowest: history.flight.lowest,
+        isNewLowest,
+        totalChecks: fares.length,
+      };
+      if (isNewLowest) {
+        slackLines.push(
+          `> *Flights ${tripConfig.flight.origin}->${tripConfig.flight.destination}*: $${flightResult.price.toFixed(
+            2
+          )} <- new low! (was ${prevLowest !== null ? `$${prevLowest.toFixed(2)}` : "N/A"})`
+        );
+      }
+    }
+
+    let combinedSummary = {
+      current: null,
+      average: null,
+      lowest: history.combined?.lowest ?? null,
+      isNewLowest: false,
+      totalChecks: history.combined?.prices?.length ?? 0,
+    };
+    if (totalStaySummary.current != null || flightSummary.current != null) {
+      const combinedCurrent =
+        (totalStaySummary.current != null ? totalStaySummary.current : 0) +
+        (flightSummary.current != null ? flightSummary.current : 0);
+      history.combined.prices.push({ price: combinedCurrent, date: now });
+      const vals = history.combined.prices.map((p) => p.price);
+      const prevLowest = history.combined.lowest;
+      const isNewLowest = prevLowest === null || combinedCurrent < prevLowest;
+      if (isNewLowest) {
+        history.combined.lowest = combinedCurrent;
+        history.combined.lowestDate = now;
+      }
+      combinedSummary = {
+        current: combinedCurrent,
+        average: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100,
+        lowest: history.combined.lowest,
+        isNewLowest,
+        totalChecks: vals.length,
+      };
+      if (isNewLowest) {
+        slackLines.push(
+          `> *Combined trip total*: $${combinedCurrent.toFixed(2)} <- new low! (was ${
+            prevLowest !== null ? `$${prevLowest.toFixed(2)}` : "N/A"
+          })`
+        );
+      }
+    }
+
+    const bookingSignal = computeBookingSignal(combinedSummary.current, combinedSummary.lowest);
+    const targetTotal =
+      tripConfig.alerts?.targetCombinedPrice ?? parseNumberEnv(process.env.TARGET_TOTAL_PRICE);
     const targetAlert = {
       enabled: targetTotal !== null,
       targetTotal,
       met:
         targetTotal !== null &&
-        totalStaySummary.current !== null &&
-        totalStaySummary.current <= targetTotal,
+        combinedSummary.current !== null &&
+        combinedSummary.current <= targetTotal,
     };
 
     await saveHistory(history);
@@ -439,27 +596,42 @@ export async function GET(request) {
     // Send notifications
     if (slackLines.length > 0) {
       const message = [
-        `🏨 *New lowest price found — The Caledonian Edinburgh*`,
+        `🏨 *New lowest trip price found — ${tripConfig.hotel.query}*`,
         ``,
         ...slackLines,
         ``,
-        `🔗 <https://www.hilton.com/en/hotels/ednchqq-the-caledonian-edinburgh/|Book here>`,
+        `✈️ ${tripConfig.flight.origin} -> ${tripConfig.flight.destination} (${tripConfig.flight.departDate} to ${tripConfig.flight.returnDate})`,
       ].join("\n");
 
       slackSent = await sendSlack(message);
     }
 
-    const emailSent = await sendEmail(nightResults, {
-      totalStay: totalStaySummary,
-      bookingSignal,
-      targetAlert,
-    });
+    const emailSent = await sendEmail(
+      nightResults,
+      {
+        hotelStay: totalStaySummary,
+        combined: combinedSummary,
+        bookingSignal,
+        targetAlert,
+      },
+      tripConfig,
+      flightSummary
+    );
 
     return Response.json({
       success: true,
-      hotel: results.find((r) => r.hotelName)?.hotelName || CONFIG.hotelQuery,
-      nights: nightResults,
-      totalStay: totalStaySummary,
+      config: tripConfig,
+      hotel: {
+        name: results.find((r) => r.hotelName)?.hotelName || tripConfig.hotel.query,
+        nights: nightResults,
+        totalStay: totalStaySummary,
+      },
+      flight: {
+        route: `${tripConfig.flight.origin}-${tripConfig.flight.destination}`,
+        ...flightSummary,
+        rawCount: flightResult.rawCount,
+      },
+      combined: combinedSummary,
       bookingSignal,
       targetAlert,
       slackSent,

@@ -20,7 +20,13 @@ export async function GET() {
     );
 
     if (blobs.length === 0) {
-      return Response.json({ nights: {}, debug: "no blobs found" });
+      return Response.json({
+        hotelNights: {},
+        hotelStay: { prices: [], lowest: null, lowestDate: null },
+        flight: { prices: [], lowest: null, lowestDate: null },
+        combined: { prices: [], lowest: null, lowestDate: null },
+        debug: "no blobs found",
+      });
     }
 
     const exact = blobs.find((b) => b.pathname === "price-history.json");
@@ -41,7 +47,10 @@ export async function GET() {
     if (!res.ok) {
       const text = await res.text();
       return Response.json({
-        nights: {},
+        hotelNights: {},
+        hotelStay: { prices: [], lowest: null, lowestDate: null },
+        flight: { prices: [], lowest: null, lowestDate: null },
+        combined: { prices: [], lowest: null, lowestDate: null },
         debug: `fetch ${res.status}: ${text.slice(0, 200)}`,
         blobInfo: { url: blob.url, downloadUrl: blob.downloadUrl, pathname: blob.pathname },
       });
@@ -49,28 +58,39 @@ export async function GET() {
 
     const data = await res.json();
 
-    if (data.prices && !data.nights) {
+    if (data.prices && !data.nights && !data.hotelNights) {
       return Response.json({
-        nights: {
+        hotelNights: {
           "2026-10-24": {
             prices: data.prices,
             lowest: data.lowest,
             lowestDate: data.lowestDate,
           },
         },
-        totalStay: { prices: [], lowest: null, lowestDate: null },
+        hotelStay: { prices: [], lowest: null, lowestDate: null },
+        flight: { prices: [], lowest: null, lowestDate: null },
+        combined: { prices: [], lowest: null, lowestDate: null },
       });
     }
 
-    if (!data.totalStay) {
-      data.totalStay = { prices: [], lowest: null, lowestDate: null };
-    }
+    if (data.nights && !data.hotelNights) data.hotelNights = data.nights;
+    if (data.totalStay && !data.hotelStay) data.hotelStay = data.totalStay;
+    if (!data.hotelNights) data.hotelNights = {};
+    if (!data.hotelStay) data.hotelStay = { prices: [], lowest: null, lowestDate: null };
+    if (!data.flight) data.flight = { prices: [], lowest: null, lowestDate: null };
+    if (!data.combined) data.combined = { prices: [], lowest: null, lowestDate: null };
 
     return Response.json(data);
   } catch (error) {
     console.error("Price history error:", errorMessage(error));
     return Response.json(
-      { nights: {}, debug: `error: ${errorMessage(error)}` },
+      {
+        hotelNights: {},
+        hotelStay: { prices: [], lowest: null, lowestDate: null },
+        flight: { prices: [], lowest: null, lowestDate: null },
+        combined: { prices: [], lowest: null, lowestDate: null },
+        debug: `error: ${errorMessage(error)}`,
+      },
       { status: 500 }
     );
   }
