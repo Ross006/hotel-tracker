@@ -1,5 +1,9 @@
 export const dynamic = "force-dynamic";
 
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
 const DEFAULT_NIGHTS = [
   { checkIn: "2026-10-23", checkOut: "2026-10-24", label: "Oct 23" },
   { checkIn: "2026-10-24", checkOut: "2026-10-25", label: "Oct 24" },
@@ -46,8 +50,9 @@ export async function GET(request) {
     }
     data = await res.json();
   } catch (err) {
-    console.log("[debug-serpapi] fetch threw:", err.message);
-    return Response.json({ error: err.message }, { status: 500 });
+    const message = errorMessage(err);
+    console.log("[debug-serpapi] fetch threw:", message);
+    return Response.json({ error: message }, { status: 500 });
   }
 
   if (raw) return Response.json(data);

@@ -130,6 +130,8 @@ export default function PricesPage() {
             <span>
               Prices updated!
               {checkResult.nights?.some((n) => n.isNewLowest) && " New lowest found! 🎉"}
+              {checkResult.totalStay?.isNewLowest && " Total stay is at a new low! 🎯"}
+              {checkResult.targetAlert?.met && " Target hit!"}
               {checkResult.slackSent && " (Slack notified)"}
             </span>
           ) : (
@@ -192,8 +194,60 @@ export default function PricesPage() {
         ) : null}
       </div>
 
+      {checkResult?.totalStay?.current != null && (
+        <div
+          style={{
+            ...s.recoBox,
+            borderLeft: `4px solid ${
+              checkResult.bookingSignal?.action === "book_now"
+                ? "#16a34a"
+                : checkResult.bookingSignal?.action === "consider"
+                  ? "#f59e0b"
+                  : "#6b7280"
+            }`,
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>
+            {checkResult.bookingSignal?.label || "Recommendation unavailable"}
+          </div>
+          <div style={{ fontSize: "0.88rem", color: "#4b5563" }}>
+            Total stay: ${checkResult.totalStay.current.toFixed(2)}
+            {checkResult.totalStay.lowest != null &&
+              ` · Best seen: $${checkResult.totalStay.lowest.toFixed(2)} · Delta: ${
+                checkResult.bookingSignal?.deltaPct != null
+                  ? `${checkResult.bookingSignal.deltaPct.toFixed(2)}%`
+                  : "N/A"
+              }`}
+          </div>
+          {checkResult.bookingSignal?.reason && (
+            <div style={{ fontSize: "0.82rem", color: "#6b7280", marginTop: 4 }}>
+              {checkResult.bookingSignal.reason}
+            </div>
+          )}
+          {checkResult.targetAlert?.enabled && (
+            <div style={{ fontSize: "0.82rem", color: "#374151", marginTop: 6 }}>
+              Target total: ${checkResult.targetAlert.targetTotal?.toFixed(2)}{" "}
+              {checkResult.targetAlert.met ? "(hit)" : "(not hit yet)"}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Per-night stats */}
       <div style={s.statsRow}>
+        {checkResult?.totalStay?.current != null && (
+          <div key="total-stay" style={s.stat}>
+            <div style={s.statLabel}>Total Stay (3 nights)</div>
+            <div style={s.statValue}>${checkResult.totalStay.current.toFixed(2)}</div>
+            <div style={s.statMeta}>
+              Low: $
+              {checkResult.totalStay.lowest != null
+                ? checkResult.totalStay.lowest.toFixed(2)
+                : "N/A"}{" "}
+              · {checkResult.totalStay.totalChecks} checks
+            </div>
+          </div>
+        )}
         {NIGHTS.map((key) => {
           const data = nights[key];
           const prices = data?.prices?.map((p) => p.price) || [];
@@ -344,6 +398,12 @@ const s = {
     lineHeight: 1.4,
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
+  },
+  recoBox: {
+    background: "#f9fafb",
+    borderRadius: 8,
+    padding: "0.75rem 1rem",
+    marginBottom: "1rem",
   },
   toast: {
     display: "flex",

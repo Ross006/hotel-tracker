@@ -2,15 +2,22 @@ import { list } from "@vercel/blob";
 
 export const dynamic = "force-dynamic";
 
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function GET() {
   try {
     const { blobs } = await list({ prefix: "price-history.json" });
-    console.log("Blob list result:", JSON.stringify(blobs.map(b => ({
-      url: b.url,
-      pathname: b.pathname,
-      downloadUrl: b.downloadUrl,
-      size: b.size,
-    }))));
+    console.log(
+      "[price-history] blobs:",
+      JSON.stringify(
+        blobs.map((b) => ({
+          pathname: b.pathname,
+          size: b.size,
+        }))
+      )
+    );
 
     if (blobs.length === 0) {
       return Response.json({ nights: {}, debug: "no blobs found" });
@@ -18,12 +25,12 @@ export async function GET() {
 
     const blob = blobs[0];
     const fetchUrl = blob.url;
-    console.log("Fetching from:", fetchUrl);
+    console.log("[price-history] fetching:", fetchUrl);
 
     const res = await fetch(fetchUrl, {
       headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
     });
-    console.log("Fetch status:", res.status);
+    console.log("[price-history] fetch status:", res.status);
 
     if (!res.ok) {
       const text = await res.text();
@@ -45,14 +52,19 @@ export async function GET() {
             lowestDate: data.lowestDate,
           },
         },
+        totalStay: { prices: [], lowest: null, lowestDate: null },
       });
+    }
+
+    if (!data.totalStay) {
+      data.totalStay = { prices: [], lowest: null, lowestDate: null };
     }
 
     return Response.json(data);
   } catch (error) {
-    console.error("Price history error:", error);
+    console.error("Price history error:", errorMessage(error));
     return Response.json(
-      { nights: {}, debug: `error: ${error.message}` },
+      { nights: {}, debug: `error: ${errorMessage(error)}` },
       { status: 500 }
     );
   }

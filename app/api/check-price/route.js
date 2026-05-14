@@ -14,6 +14,51 @@ const CONFIG = {
   blobKey: "price-history.json",
 };
 
+function errorMessage(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function parseNumberEnv(value) {
+  if (!value) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function computeBookingSignal(current, lowest) {
+  if (current == null || lowest == null || lowest <= 0) {
+    return {
+      action: "insufficient_data",
+      label: "Need more data",
+      deltaPct: null,
+      reason: "Not enough history to estimate a booking signal yet.",
+    };
+  }
+
+  const deltaPct = ((current - lowest) / lowest) * 100;
+  if (deltaPct <= 2) {
+    return {
+      action: "book_now",
+      label: "Book now",
+      deltaPct: Math.round(deltaPct * 100) / 100,
+      reason: "Current total is within 2% of the best seen price.",
+    };
+  }
+  if (deltaPct <= 5) {
+    return {
+      action: "consider",
+      label: "Consider booking",
+      deltaPct: Math.round(deltaPct * 100) / 100,
+      reason: "Current total is close to the best seen price.",
+    };
+  }
+  return {
+    action: "wait",
+    label: "Wait",
+    deltaPct: Math.round(deltaPct * 100) / 100,
+    reason: "Current total is still meaningfully above the best seen price.",
+  };
+}
+
 // ─── HELPERS ──────────────────────────────────────────
 
 async function fetchPriceForNight(checkIn, checkOut) {
@@ -40,11 +85,9 @@ async function fetchPriceForNight(checkIn, checkOut) {
   const properties = data.properties || [];
 
   console.log(
-    `[check-price] ${checkIn} → ${checkOut}: ${properties.length} properties, ` +
-      `topLevelKeys=${Object.keys(data).join(",")}, ` +
-      `serpApiError=${data.error || "none"}, ` +
-      `topName=${data.name || "none"}, ` +
-      `names=${JSON.stringify(properties.slice(0, 10).map((p) => p.name))}`
+    `[check-price] ${checkIn} -> ${checkOut}: shape=${
+      data.rate_per_night && data.name ? "single-hotel" : "list"
+    } properties=${properties.length} serpApiError=${data.error || "none"}`
   );
 
   // SerpApi returns a single-hotel detail response (top-level name + rate_per_night)
@@ -93,7 +136,7 @@ async function loadHistory() {
     const { blobs } = await list({ prefix: CONFIG.blobKey });
     if (blobs.length === 0) {
       console.log("[check-price] loadHistory: no blob found, starting fresh");
-      return { nights: {} };
+      return { nights: {}, totalStay: { prices: [], lowest: null, lowestDate: null } };
     }
 
     const res = await fetch(blobs[0].url, {
@@ -118,7 +161,12 @@ async function loadHistory() {
             lowestDate: data.lowestDate,
           },
         },
+        totalStay: { prices: [], lowest: null, lowestDate: null },
       };
+    }
+
+    if (!data.totalStay) {
+      data.totalStay = { prices: [], lowest: null, lowestDate: null };
     }
 
     const summary = Object.entries(data.nights || {}).map(
@@ -127,7 +175,7 @@ async function loadHistory() {
     console.log(`[check-price] loadHistory: loaded ${summary.join(", ") || "(empty)"}`);
     return data;
   } catch (err) {
-    console.warn(`[check-price] loadHistory failed: ${err.message}`);
+    console.warn(`[check-price] loadHistory failed: ${errorMessage(err)}`);
     throw err;
   }
 }
@@ -136,7 +184,10 @@ async function saveHistory(history) {
   const summary = Object.entries(history.nights || {}).map(
     ([k, v]) => `${k}=${v.prices?.length ?? 0}`
   );
-  console.log(`[check-price] saveHistory: writing ${summary.join(", ") || "(empty)"}`);
+  const totalCount = history.totalStay?.prices?.length ?? 0;
+  console.log(
+    `[check-price] saveHistory: writing ${summary.join(", ") || "(empty)"} totalStay=${totalCount}`
+  );
   const result = await put(CONFIG.blobKey, JSON.stringify(history, null, 2), {
     access: "private",
     addRandomSuffix: false,
@@ -163,7 +214,7 @@ async function sendSlack(message) {
   return true;
 }
 
-async function sendEmail(nightResults) {
+async function sendEmail(nightResults, summary) {
   const apiKey = process.env.RESEND_API_KEY;
   const emailTo = process.env.EMAIL_TO;
   if (!apiKey || !emailTo) return false;
@@ -185,14 +236,40 @@ async function sendEmail(nightResults) {
     .join("");
 
   const hasNewLow = nightResults.some((n) => n.isNewLowest);
+  const hasTargetHit = summary?.targetAlert?.met;
   const subject = hasNewLow
     ? "🏨 New lowest price — The Caledonian Edinburgh"
-    : "🏨 Price update — The Caledonian Edinburgh";
+    : hasTargetHit
+      ? "🏨 Target price hit — The Caledonian Edinburgh"
+      : "🏨 Price update — The Caledonian Edinburgh";
+
+  const totalStayLine =
+    summary?.totalStay?.current != null
+      ? `<p style="margin:0 0 8px;font-size:14px;"><strong>Total stay:</strong> $${summary.totalStay.current.toFixed(
+          2
+        )} (best: ${
+          summary.totalStay.lowest != null ? `$${summary.totalStay.lowest.toFixed(2)}` : "N/A"
+        })</p>`
+      : "";
+  const signalLine = summary?.bookingSignal?.label
+    ? `<p style="margin:0 0 12px;font-size:14px;"><strong>Recommendation:</strong> ${summary.bookingSignal.label} — ${summary.bookingSignal.reason}</p>`
+    : "";
+  const targetLine =
+    summary?.targetAlert?.enabled && summary?.targetAlert?.targetTotal != null
+      ? `<p style="margin:0 0 12px;font-size:14px;"><strong>Target:</strong> $${summary.targetAlert.targetTotal.toFixed(
+          2
+        )} ${
+          summary.targetAlert.met ? '<span style="color:#16a34a;font-weight:700;">(hit)</span>' : ""
+        }</p>`
+      : "";
 
   const html = `
     <div style="font-family:system-ui,sans-serif;max-width:500px;margin:0 auto;">
       <h2 style="margin:0 0 4px;">The Caledonian Edinburgh</h2>
       <p style="color:#666;margin:0 0 16px;font-size:14px;">Daily price check · Oct 23–25, 2026</p>
+      ${totalStayLine}
+      ${signalLine}
+      ${targetLine}
       <table style="width:100%;border-collapse:collapse;font-size:14px;">
         <thead>
           <tr style="border-bottom:2px solid #e5e7eb;">
@@ -212,7 +289,7 @@ async function sendEmail(nightResults) {
     await resend.emails.send({ from: fromAddr, to: emailTo, subject, html });
     return true;
   } catch (err) {
-    console.warn("Email send failed:", err.message);
+    console.warn("Email send failed:", errorMessage(err));
     return false;
   }
 }
@@ -295,6 +372,60 @@ export async function GET(request) {
       }
     }
 
+    const completeNightPrices = nightResults
+      .filter((n) => n.price != null)
+      .map((n) => n.price);
+    let totalStaySummary = {
+      current: null,
+      average: null,
+      lowest: history.totalStay?.lowest ?? null,
+      isNewLowest: false,
+      totalChecks: history.totalStay?.prices?.length ?? 0,
+    };
+
+    if (completeNightPrices.length === CONFIG.nights.length) {
+      const total = completeNightPrices.reduce((a, b) => a + b, 0);
+      if (!history.totalStay) {
+        history.totalStay = { prices: [], lowest: null, lowestDate: null };
+      }
+      history.totalStay.prices.push({ price: total, date: now });
+      const totals = history.totalStay.prices.map((p) => p.price);
+      const prevLowestTotal = history.totalStay.lowest;
+      const isNewLowestTotal = prevLowestTotal === null || total < prevLowestTotal;
+      if (isNewLowestTotal) {
+        history.totalStay.lowest = total;
+        history.totalStay.lowestDate = now;
+      }
+      totalStaySummary = {
+        current: total,
+        average: Math.round((totals.reduce((a, b) => a + b, 0) / totals.length) * 100) / 100,
+        lowest: history.totalStay.lowest,
+        isNewLowest: isNewLowestTotal,
+        totalChecks: totals.length,
+      };
+      if (isNewLowestTotal) {
+        slackLines.push(
+          `> *Total stay (3 nights)*: $${total.toFixed(2)} <- new low! (was ${
+            prevLowestTotal !== null ? `$${prevLowestTotal.toFixed(2)}` : "N/A"
+          })`
+        );
+      }
+    }
+
+    const bookingSignal = computeBookingSignal(
+      totalStaySummary.current,
+      totalStaySummary.lowest
+    );
+    const targetTotal = parseNumberEnv(process.env.TARGET_TOTAL_PRICE);
+    const targetAlert = {
+      enabled: targetTotal !== null,
+      targetTotal,
+      met:
+        targetTotal !== null &&
+        totalStaySummary.current !== null &&
+        totalStaySummary.current <= targetTotal,
+    };
+
     await saveHistory(history);
 
     // Send notifications
@@ -310,20 +441,27 @@ export async function GET(request) {
       slackSent = await sendSlack(message);
     }
 
-    const emailSent = await sendEmail(nightResults);
+    const emailSent = await sendEmail(nightResults, {
+      totalStay: totalStaySummary,
+      bookingSignal,
+      targetAlert,
+    });
 
     return Response.json({
       success: true,
       hotel: results.find((r) => r.hotelName)?.hotelName || CONFIG.hotelQuery,
       nights: nightResults,
+      totalStay: totalStaySummary,
+      bookingSignal,
+      targetAlert,
       slackSent,
       emailSent,
       timestamp: now,
     });
   } catch (error) {
-    console.error("Price check failed:", error);
+    console.error("Price check failed:", errorMessage(error));
     return Response.json(
-      { success: false, error: error.message },
+      { success: false, error: errorMessage(error) },
       { status: 500 }
     );
   }
