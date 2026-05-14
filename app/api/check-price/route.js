@@ -91,15 +91,25 @@ function parseRate(rate) {
 async function loadHistory() {
   try {
     const { blobs } = await list({ prefix: CONFIG.blobKey });
-    if (blobs.length === 0) return { nights: {} };
+    if (blobs.length === 0) {
+      console.log("[check-price] loadHistory: no blob found, starting fresh");
+      return { nights: {} };
+    }
 
     const res = await fetch(blobs[0].url, {
       headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
     });
+    if (!res.ok) {
+      const body = await res.text();
+      console.warn(
+        `[check-price] loadHistory: blob fetch failed ${res.status} — keeping existing entries by aborting save. body=${body.slice(0, 200)}`
+      );
+      throw new Error(`blob fetch ${res.status}`);
+    }
     const data = await res.json();
 
-    // Migrate old single-night format to multi-night
     if (data.prices && !data.nights) {
+      console.log("[check-price] loadHistory: migrating single-night format");
       return {
         nights: {
           "2026-10-24": {
@@ -111,19 +121,29 @@ async function loadHistory() {
       };
     }
 
+    const summary = Object.entries(data.nights || {}).map(
+      ([k, v]) => `${k}=${v.prices?.length ?? 0}`
+    );
+    console.log(`[check-price] loadHistory: loaded ${summary.join(", ") || "(empty)"}`);
     return data;
-  } catch {
-    return { nights: {} };
+  } catch (err) {
+    console.warn(`[check-price] loadHistory failed: ${err.message}`);
+    throw err;
   }
 }
 
 async function saveHistory(history) {
-  await put(CONFIG.blobKey, JSON.stringify(history, null, 2), {
+  const summary = Object.entries(history.nights || {}).map(
+    ([k, v]) => `${k}=${v.prices?.length ?? 0}`
+  );
+  console.log(`[check-price] saveHistory: writing ${summary.join(", ") || "(empty)"}`);
+  const result = await put(CONFIG.blobKey, JSON.stringify(history, null, 2), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "application/json",
   });
+  console.log(`[check-price] saveHistory: ok, size=${result.size ?? "?"} pathname=${result.pathname}`);
 }
 
 async function sendSlack(message) {
@@ -251,6 +271,10 @@ export async function GET(request) {
           );
         }
 
+        console.log(
+          `[check-price] appended ${key}: $${result.price} (total=${allPrices.length}, lowest=$${nightHistory.lowest}, newLow=${isNewLowest})`
+        );
+
         nightResults.push({
           night: result.label,
           checkIn: result.checkIn,
@@ -261,6 +285,7 @@ export async function GET(request) {
           totalChecks: allPrices.length,
         });
       } else {
+        console.log(`[check-price] skipped ${key}: no price returned`);
         nightResults.push({
           night: result.label,
           checkIn: result.checkIn,
