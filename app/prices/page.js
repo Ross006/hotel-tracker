@@ -11,6 +11,8 @@ export default function PricesPage() {
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [debugging, setDebugging] = useState(false);
+  const [debugResult, setDebugResult] = useState(null);
 
   const fetchData = useCallback(async () => {
     const [histRes, usageRes] = await Promise.all([
@@ -38,6 +40,20 @@ export default function PricesPage() {
       setCheckResult({ success: false, error: err.message });
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function handleDebug() {
+    setDebugging(true);
+    setDebugResult(null);
+    try {
+      const res = await fetch("/api/debug-serpapi");
+      const data = await res.json();
+      setDebugResult(data);
+    } catch (err) {
+      setDebugResult({ error: err.message });
+    } finally {
+      setDebugging(false);
     }
   }
 
@@ -76,17 +92,31 @@ export default function PricesPage() {
           <h1 style={s.heading}>The Caledonian Edinburgh</h1>
           <p style={s.subtitle}>Price History · 3 nights tracked</p>
         </div>
-        <button
-          onClick={handleCheck}
-          disabled={checking}
-          style={{
-            ...s.button,
-            opacity: checking ? 0.6 : 1,
-            cursor: checking ? "wait" : "pointer",
-          }}
-        >
-          {checking ? "Checking…" : "Check Now"}
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            onClick={handleDebug}
+            disabled={debugging}
+            style={{
+              ...s.button,
+              ...s.buttonSecondary,
+              opacity: debugging ? 0.6 : 1,
+              cursor: debugging ? "wait" : "pointer",
+            }}
+          >
+            {debugging ? "Loading…" : "Debug"}
+          </button>
+          <button
+            onClick={handleCheck}
+            disabled={checking}
+            style={{
+              ...s.button,
+              opacity: checking ? 0.6 : 1,
+              cursor: checking ? "wait" : "pointer",
+            }}
+          >
+            {checking ? "Checking…" : "Check Now"}
+          </button>
+        </div>
       </div>
 
       {checkResult && (
@@ -108,6 +138,38 @@ export default function PricesPage() {
           <button onClick={() => setCheckResult(null)} style={s.toastClose}>
             ✕
           </button>
+        </div>
+      )}
+
+      {debugResult && (
+        <div style={s.debugPanel}>
+          <div style={s.debugHeader}>
+            <strong style={{ fontSize: "0.85rem" }}>SerpApi debug</strong>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <span style={{ fontSize: "0.75rem", color: "#888" }}>
+                {debugResult.propertyCount != null
+                  ? `${debugResult.propertyCount} properties`
+                  : debugResult.error || "—"}
+              </span>
+              <button onClick={() => setDebugResult(null)} style={s.toastClose}>
+                ✕
+              </button>
+            </div>
+          </div>
+          {debugResult.caledonianOrPrincesStreetMatches?.length > 0 && (
+            <div style={{ marginBottom: "0.5rem" }}>
+              <div style={s.debugSubhead}>Caledonian / Princes Street matches</div>
+              {debugResult.caledonianOrPrincesStreetMatches.map((m, i) => (
+                <div key={i} style={s.debugMatch}>
+                  <span>{m.name}</span>
+                  <span style={{ color: "#666" }}>
+                    {m.rate_per_night?.lowest || m.rate_per_night?.extracted_lowest || "no rate"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <pre style={s.debugPre}>{JSON.stringify(debugResult, null, 2)}</pre>
         </div>
       )}
 
@@ -240,6 +302,48 @@ const s = {
     fontSize: "0.9rem",
     fontWeight: 600,
     whiteSpace: "nowrap",
+  },
+  buttonSecondary: {
+    background: "#fff",
+    color: "#111",
+    border: "1px solid #d1d5db",
+  },
+  debugPanel: {
+    background: "#0b1020",
+    color: "#e5e7eb",
+    borderRadius: 8,
+    padding: "0.75rem 1rem",
+    marginBottom: "1.25rem",
+    fontSize: "0.8rem",
+  },
+  debugHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "0.5rem",
+    color: "#e5e7eb",
+  },
+  debugSubhead: {
+    fontSize: "0.7rem",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    color: "#9ca3af",
+    marginBottom: 4,
+  },
+  debugMatch: {
+    display: "flex",
+    justifyContent: "space-between",
+    padding: "2px 0",
+    fontSize: "0.8rem",
+  },
+  debugPre: {
+    margin: 0,
+    maxHeight: 360,
+    overflow: "auto",
+    fontSize: "0.72rem",
+    lineHeight: 1.4,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
   },
   toast: {
     display: "flex",
