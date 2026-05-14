@@ -150,36 +150,101 @@ async function fetchFlightPrice(config) {
     return null;
   }
 
+  const preferredCarrierSet = new Set(
+    String(config.flight.preferredCarriers || "")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean)
+  );
+  const hasCarrierPreference = preferredCarrierSet.size > 0;
+  const maxStops =
+    config.flight.maxStops === "" || config.flight.maxStops == null
+      ? null
+      : Number(config.flight.maxStops);
+  const maxDuration =
+    config.flight.maxDurationMinutes === "" || config.flight.maxDurationMinutes == null
+      ? null
+      : Number(config.flight.maxDurationMinutes);
+
+  function getOptionDetails(option) {
+    const flights = Array.isArray(option?.flights) ? option.flights : [];
+    const firstLeg = flights[0];
+    const lastLeg = flights[flights.length - 1];
+    const carriers = [...new Set(flights.map((f) => f?.airline).filter(Boolean))];
+    const stopCount = Math.max(0, (flights.length || 1) - 1);
+    const layovers = flights
+      .slice(0, -1)
+      .map((segment, idx) => {
+        const next = flights[idx + 1];
+        return {
+          airport:
+            segment?.arrival_airport?.id ||
+            segment?.arrival_airport?.name ||
+            null,
+          fromArrival: segment?.arrival_airport?.time || null,
+          toDeparture: next?.departure_airport?.time || null,
+        };
+      })
+      .filter((l) => l.airport);
+    return {
+      carriers,
+      segments: flights.length || null,
+      durationMinutes: option?.total_duration ?? null,
+      departureTime: firstLeg?.departure_airport?.time || null,
+      arrivalTime: lastLeg?.arrival_airport?.time || null,
+      stopCount,
+      layovers,
+      bookingToken:
+        typeof option?.booking_token === "string" ? option.booking_token : null,
+    };
+  }
+
+  function optionPassesConstraints(option, details) {
+    if (hasCarrierPreference) {
+      const carrierHit = details.carriers.some((c) =>
+        preferredCarrierSet.has(String(c).toUpperCase())
+      );
+      if (!carrierHit) return false;
+    }
+    if (maxStops != null && Number.isFinite(maxStops) && details.stopCount > maxStops) {
+      return false;
+    }
+    if (
+      maxDuration != null &&
+      Number.isFinite(maxDuration) &&
+      details.durationMinutes != null &&
+      details.durationMinutes > maxDuration
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   let best = null;
   let bestOption = null;
+  let bestDetails = null;
+  let filteredOut = 0;
   for (const option of options) {
     const p = parseFlightPrice(option?.price);
-    if (p != null && (best === null || p < best)) {
+    if (p == null) continue;
+    const details = getOptionDetails(option);
+    if (!optionPassesConstraints(option, details)) {
+      filteredOut += 1;
+      continue;
+    }
+    if (best === null || p < best) {
       best = p;
       bestOption = option;
+      bestDetails = details;
     }
   }
 
-  const flights = Array.isArray(bestOption?.flights) ? bestOption.flights : [];
-  const firstLeg = flights[0];
-  const lastLeg = flights[flights.length - 1];
-  const carriers = [...new Set(flights.map((f) => f?.airline).filter(Boolean))];
-  const details = bestOption
-    ? {
-        carriers,
-        segments: flights.length || null,
-        durationMinutes: bestOption?.total_duration ?? null,
-        departureTime: firstLeg?.departure_airport?.time || null,
-        arrivalTime: lastLeg?.arrival_airport?.time || null,
-        stopCount: Math.max(0, (flights.length || 1) - 1),
-        bookingToken:
-          typeof bestOption?.booking_token === "string" ? bestOption.booking_token : null,
-      }
-    : null;
+  const details = bestOption ? bestDetails : null;
   return {
     price: best,
     rawCount: options.length,
     details,
+    filteredOut,
   };
 }
 
@@ -435,7 +500,7 @@ export async function GET(request) {
 
     const flightResult = flightEnabled
       ? await fetchFlightPrice(tripConfig)
-      : { price: null, rawCount: 0, details: null };
+      : { price: null, rawCount: 0, details: null, filteredOut: 0 };
 
     const history = await loadHistory();
     const now = new Date().toISOString();
@@ -656,6 +721,7 @@ export async function GET(request) {
         ...flightSummary,
         rawCount: flightResult.rawCount,
         details: flightResult.details,
+        filteredOut: flightResult.filteredOut,
       },
       combined: combinedSummary,
       bookingSignal,

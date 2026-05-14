@@ -73,6 +73,7 @@ export default function DashboardClient() {
     lowest: history?.flight?.lowest ?? null,
     totalChecks: history?.flight?.prices?.length ?? 0,
     details: history?.flight?.prices?.at?.(-1)?.details ?? null,
+    filteredOut: 0,
   };
   const combined = checkResult?.combined || {
     current: history?.combined?.prices?.at?.(-1)?.price ?? null,
@@ -168,6 +169,7 @@ export default function DashboardClient() {
         <div style={s.flightNote}>
           Current flight estimate: <strong>{fmt(flight.current)}</strong>
           {flightRoute ? ` for ${flightRoute}` : ""} · best seen {fmt(flight.lowest)}
+          {flight.filteredOut ? ` · filtered out ${flight.filteredOut} options` : ""}
         </div>
       )}
 
@@ -183,6 +185,8 @@ export default function DashboardClient() {
                 <th style={{ ...s.th, textAlign: "left" }}>Carriers</th>
                 <th style={{ ...s.th, textAlign: "right" }}>Stops</th>
                 <th style={{ ...s.th, textAlign: "right" }}>Duration</th>
+                <th style={{ ...s.th, textAlign: "left" }}>Timing</th>
+                <th style={{ ...s.th, textAlign: "left" }}>Layovers</th>
               </tr>
             </thead>
             <tbody>
@@ -222,6 +226,24 @@ export default function DashboardClient() {
                       </td>
                       <td style={{ ...s.td, textAlign: "right" }}>
                         {fmtMinutes(entry.details?.durationMinutes)}
+                      </td>
+                      <td style={s.td}>
+                        {entry.details?.departureTime || entry.details?.arrivalTime
+                          ? `${entry.details?.departureTime || "?"} -> ${
+                              entry.details?.arrivalTime || "?"
+                            }`
+                          : "—"}
+                      </td>
+                      <td style={s.td}>
+                        {entry.details?.layovers?.length
+                          ? entry.details.layovers
+                              .map((l) =>
+                                l.fromArrival && l.toDeparture
+                                  ? `${l.airport} (${l.fromArrival} -> ${l.toDeparture})`
+                                  : `${l.airport}`
+                              )
+                              .join(" | ")
+                          : "Non-stop / none"}
                       </td>
                     </tr>
                   );
