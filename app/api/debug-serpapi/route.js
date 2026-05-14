@@ -67,12 +67,24 @@ export async function GET(request) {
     return n.includes("caledonian") || n.includes("princes street");
   }).map((p) => ({ name: p.name, rate_per_night: p.rate_per_night }));
 
+  const singleHotel = data.name && data.rate_per_night
+    ? {
+        name: data.name,
+        rate_per_night: data.rate_per_night,
+        total_rate: data.total_rate,
+        featured_prices_count: Array.isArray(data.featured_prices) ? data.featured_prices.length : null,
+        prices_count: Array.isArray(data.prices) ? data.prices.length : null,
+      }
+    : null;
+
   const summary = {
     query: { q, checkIn, checkOut },
+    responseShape: singleHotel ? "single-hotel" : properties.length > 0 ? "list" : "unknown",
     topLevelKeys,
     propertyCount: properties.length,
     serpApiError: data.error || null,
     searchMetadataStatus: data.search_metadata?.status || null,
+    singleHotel,
     properties: propertySummaries,
     caledonianOrPrincesStreetMatches: caledonianMatches,
   };

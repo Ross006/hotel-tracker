@@ -43,39 +43,49 @@ async function fetchPriceForNight(checkIn, checkOut) {
     `[check-price] ${checkIn} → ${checkOut}: ${properties.length} properties, ` +
       `topLevelKeys=${Object.keys(data).join(",")}, ` +
       `serpApiError=${data.error || "none"}, ` +
+      `topName=${data.name || "none"}, ` +
       `names=${JSON.stringify(properties.slice(0, 10).map((p) => p.name))}`
   );
+
+  // SerpApi returns a single-hotel detail response (top-level name + rate_per_night)
+  // when the query resolves to one specific property. Otherwise it returns a list
+  // under data.properties.
+  if (data.rate_per_night && data.name) {
+    const price = parseRate(data.rate_per_night);
+    console.log(
+      `[check-price] single-hotel "${data.name}" for ${checkIn}, rate=${JSON.stringify(data.rate_per_night)}, parsedPrice=${price}`
+    );
+    if (price) return { price, hotelName: data.name };
+  }
 
   for (const prop of properties) {
     const name = (prop.name || "").toLowerCase();
     if (name.includes("caledonian") && name.includes("edinburgh")) {
-      const rate = prop.rate_per_night || {};
-      const priceStr =
-        rate.lowest || rate.before_taxes_fees || rate.extracted_lowest || "";
-
-      let price;
-      if (typeof priceStr === "number") {
-        price = priceStr;
-      } else if (typeof priceStr === "string" && priceStr.length > 0) {
-        price = parseFloat(priceStr.replace(/[$$€,]/g, "").trim());
-      }
-
-      if ((!price || isNaN(price)) && rate.extracted_lowest) {
-        price = rate.extracted_lowest;
-      }
-
+      const price = parseRate(prop.rate_per_night);
       console.log(
-        `[check-price] matched "${prop.name}" for ${checkIn}, rate=${JSON.stringify(rate)}, parsedPrice=${price}`
+        `[check-price] matched list "${prop.name}" for ${checkIn}, rate=${JSON.stringify(prop.rate_per_night)}, parsedPrice=${price}`
       );
-
-      if (price && !isNaN(price)) {
-        return { price, hotelName: prop.name };
-      }
+      if (price) return { price, hotelName: prop.name };
     }
   }
 
-  console.log(`[check-price] no match for ${checkIn} (looked for "caledonian" + "edinburgh")`);
+  console.log(`[check-price] no match for ${checkIn}`);
   return { price: null, hotelName: null };
+}
+
+function parseRate(rate) {
+  if (!rate) return null;
+  const priceStr = rate.lowest || rate.before_taxes_fees || rate.extracted_lowest || "";
+  let price;
+  if (typeof priceStr === "number") {
+    price = priceStr;
+  } else if (typeof priceStr === "string" && priceStr.length > 0) {
+    price = parseFloat(priceStr.replace(/[£$€,]/g, "").trim());
+  }
+  if ((!price || isNaN(price)) && rate.extracted_lowest) {
+    price = rate.extracted_lowest;
+  }
+  return price && !isNaN(price) ? price : null;
 }
 
 async function loadHistory() {
