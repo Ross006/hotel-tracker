@@ -239,7 +239,9 @@ export default function DashboardClient() {
                           ? entry.details.layovers
                               .map((l) =>
                                 l.fromArrival && l.toDeparture
-                                  ? `${l.airport} (${l.fromArrival} -> ${l.toDeparture})`
+                                  ? `${l.airport} (${l.fromArrival} -> ${l.toDeparture}${
+                                      l.minutes != null ? `, ${fmtMinutes(l.minutes)} layover` : ""
+                                    })`
                                   : `${l.airport}`
                               )
                               .join(" | ")
@@ -250,6 +252,58 @@ export default function DashboardClient() {
                 })}
             </tbody>
           </table>
+
+          {[...(history?.flight?.prices || [])]
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, 3)
+            .map((entry, idx) => (
+              <details key={`itin-${idx}`} style={s.itineraryCard}>
+                <summary style={s.itinerarySummary}>
+                  {new Date(entry.date).toLocaleString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}{" "}
+                  · {fmt(entry.price)} · {entry.details?.carriers?.join(", ") || "unknown carriers"}
+                </summary>
+                {entry.details?.segmentsDetailed?.length ? (
+                  <table style={s.innerTable}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...s.innerTh, textAlign: "left" }}>Leg</th>
+                        <th style={{ ...s.innerTh, textAlign: "left" }}>Route</th>
+                        <th style={{ ...s.innerTh, textAlign: "left" }}>Times</th>
+                        <th style={{ ...s.innerTh, textAlign: "right" }}>Duration</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entry.details.segmentsDetailed.map((seg, i) => (
+                        <tr key={i}>
+                          <td style={s.innerTd}>
+                            {seg.airline || "Carrier"} {seg.flightNumber || ""}
+                          </td>
+                          <td style={s.innerTd}>
+                            {seg.fromCode || "?"} → {seg.toCode || "?"}
+                          </td>
+                          <td style={s.innerTd}>
+                            {(seg.fromTime || "?")} → {(seg.toTime || "?")}
+                          </td>
+                          <td style={{ ...s.innerTd, textAlign: "right" }}>
+                            {fmtMinutes(seg.durationMinutes)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>
+                    Detailed segment data unavailable for this check.
+                  </div>
+                )}
+              </details>
+            ))}
         </>
       )}
 
@@ -447,6 +501,33 @@ const s = {
   statMeta: { fontSize: "0.78rem", color: "#666" },
   empty: { background: "#f5f5f5", borderRadius: 8, padding: "1rem", color: "#777" },
   sectionTitle: { margin: "0.75rem 0 0.5rem", fontSize: "1rem" },
+  itineraryCard: {
+    marginTop: 8,
+    marginBottom: 8,
+    border: "1px solid #e5e7eb",
+    borderRadius: 8,
+    padding: "0.55rem 0.7rem",
+    background: "#fafafa",
+  },
+  itinerarySummary: {
+    cursor: "pointer",
+    fontWeight: 600,
+    fontSize: "0.86rem",
+    color: "#374151",
+  },
+  innerTable: { width: "100%", borderCollapse: "collapse", marginTop: 8, fontSize: "0.82rem" },
+  innerTh: {
+    borderBottom: "1px solid #e5e7eb",
+    padding: "0.35rem 0.45rem",
+    color: "#6b7280",
+    fontSize: "0.72rem",
+    textTransform: "uppercase",
+  },
+  innerTd: {
+    borderBottom: "1px solid #f3f4f6",
+    padding: "0.4rem 0.45rem",
+    color: "#111827",
+  },
   table: { width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" },
   th: {
     borderBottom: "2px solid #e5e7eb",

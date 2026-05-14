@@ -18,6 +18,20 @@ function parseNumberEnv(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseDateMaybe(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function diffMinutes(start, end) {
+  const s = parseDateMaybe(start);
+  const e = parseDateMaybe(end);
+  if (!s || !e) return null;
+  const mins = Math.round((e.getTime() - s.getTime()) / 60000);
+  return Number.isFinite(mins) ? mins : null;
+}
+
 function computeBookingSignal(current, lowest) {
   if (current == null || lowest == null || lowest <= 0) {
     return {
@@ -176,6 +190,10 @@ async function fetchFlightPrice(config) {
       .slice(0, -1)
       .map((segment, idx) => {
         const next = flights[idx + 1];
+        const layoverMinutes = diffMinutes(
+          segment?.arrival_airport?.time,
+          next?.departure_airport?.time
+        );
         return {
           airport:
             segment?.arrival_airport?.id ||
@@ -183,9 +201,24 @@ async function fetchFlightPrice(config) {
             null,
           fromArrival: segment?.arrival_airport?.time || null,
           toDeparture: next?.departure_airport?.time || null,
+          minutes: layoverMinutes,
         };
       })
       .filter((l) => l.airport);
+    const segmentsDetailed = flights.map((segment) => ({
+      airline: segment?.airline || null,
+      flightNumber: segment?.flight_number || null,
+      fromCode: segment?.departure_airport?.id || null,
+      fromName: segment?.departure_airport?.name || null,
+      fromTime: segment?.departure_airport?.time || null,
+      toCode: segment?.arrival_airport?.id || null,
+      toName: segment?.arrival_airport?.name || null,
+      toTime: segment?.arrival_airport?.time || null,
+      durationMinutes:
+        segment?.duration == null ? diffMinutes(segment?.departure_airport?.time, segment?.arrival_airport?.time) : segment?.duration,
+      airplane: segment?.airplane || null,
+      travelClass: segment?.travel_class || null,
+    }));
     return {
       carriers,
       segments: flights.length || null,
@@ -194,8 +227,19 @@ async function fetchFlightPrice(config) {
       arrivalTime: lastLeg?.arrival_airport?.time || null,
       stopCount,
       layovers,
+      segmentsDetailed,
       bookingToken:
         typeof option?.booking_token === "string" ? option.booking_token : null,
+      carbonKg:
+        option?.carbon_emissions?.this_flight != null
+          ? option.carbon_emissions.this_flight
+          : null,
+      departureAirportCode: firstLeg?.departure_airport?.id || null,
+      arrivalAirportCode: lastLeg?.arrival_airport?.id || null,
+      bookingUrl:
+        typeof option?.booking_url === "string"
+          ? option.booking_url
+          : null,
     };
   }
 

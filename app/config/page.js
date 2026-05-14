@@ -130,52 +130,6 @@ export default function ConfigPage() {
             />
           </div>
         </div>
-        <div style={s.grid2}>
-          <div>
-            <label style={s.label}>Preferred carriers (comma-separated)</label>
-            <input
-              style={s.input}
-              placeholder="e.g. UNITED, LUFTHANSA"
-              value={config.flight.preferredCarriers || ""}
-              onChange={(e) => patch("flight", "preferredCarriers", e.target.value.toUpperCase())}
-            />
-          </div>
-          <div>
-            <label style={s.label}>Cabin</label>
-            <select
-              style={s.input}
-              value={config.flight.cabin}
-              onChange={(e) => patch("flight", "cabin", e.target.value)}
-            >
-              <option value="ECONOMY">Economy</option>
-              <option value="PREMIUM_ECONOMY">Premium Economy</option>
-              <option value="BUSINESS">Business</option>
-              <option value="FIRST">First</option>
-            </select>
-          </div>
-        </div>
-        <div style={s.grid2}>
-          <div>
-            <label style={s.label}>Max stops (optional)</label>
-            <input
-              type="number"
-              style={s.input}
-              placeholder="e.g. 1"
-              value={config.flight.maxStops ?? ""}
-              onChange={(e) => patch("flight", "maxStops", e.target.value)}
-            />
-          </div>
-          <div>
-            <label style={s.label}>Max duration in minutes (optional)</label>
-            <input
-              type="number"
-              style={s.input}
-              placeholder="e.g. 900"
-              value={config.flight.maxDurationMinutes ?? ""}
-              onChange={(e) => patch("flight", "maxDurationMinutes", e.target.value)}
-            />
-          </div>
-        </div>
       </section>
 
       <section style={s.card}>
@@ -208,6 +162,30 @@ export default function ConfigPage() {
         </div>
         <div style={s.grid2}>
           <div>
+            <label style={s.label}>Cabin</label>
+            <select
+              style={s.input}
+              value={config.flight.cabin}
+              onChange={(e) => patch("flight", "cabin", e.target.value)}
+            >
+              <option value="ECONOMY">Economy</option>
+              <option value="PREMIUM_ECONOMY">Premium Economy</option>
+              <option value="BUSINESS">Business</option>
+              <option value="FIRST">First</option>
+            </select>
+          </div>
+          <div>
+            <label style={s.label}>Preferred carriers (comma-separated)</label>
+            <input
+              style={s.input}
+              placeholder="e.g. UNITED, LUFTHANSA"
+              value={config.flight.preferredCarriers || ""}
+              onChange={(e) => patch("flight", "preferredCarriers", e.target.value.toUpperCase())}
+            />
+          </div>
+        </div>
+        <div style={s.grid2}>
+          <div>
             <label style={s.label}>Depart date</label>
             <input
               type="date"
@@ -223,6 +201,28 @@ export default function ConfigPage() {
               style={s.input}
               value={config.flight.returnDate}
               onChange={(e) => patch("flight", "returnDate", e.target.value)}
+            />
+          </div>
+        </div>
+        <div style={s.grid2}>
+          <div>
+            <label style={s.label}>Max stops (optional)</label>
+            <input
+              type="number"
+              style={s.input}
+              placeholder="e.g. 1"
+              value={config.flight.maxStops ?? ""}
+              onChange={(e) => patch("flight", "maxStops", e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={s.label}>Max duration in minutes (optional)</label>
+            <input
+              type="number"
+              style={s.input}
+              placeholder="e.g. 900"
+              value={config.flight.maxDurationMinutes ?? ""}
+              onChange={(e) => patch("flight", "maxDurationMinutes", e.target.value)}
             />
           </div>
         </div>
