@@ -1,4 +1,5 @@
 import { list } from "@vercel/blob";
+import { loadTripConfig } from "../../../lib/trip-config-store";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,7 @@ function errorMessage(err) {
 
 export async function GET() {
   try {
+    const config = await loadTripConfig();
     const { blobs } = await list({ prefix: "price-history.json" });
     console.log(
       "[price-history] blobs:",
@@ -21,6 +23,7 @@ export async function GET() {
 
     if (blobs.length === 0) {
       return Response.json({
+        config,
         hotelNights: {},
         hotelStay: { prices: [], lowest: null, lowestDate: null },
         flight: { prices: [], lowest: null, lowestDate: null },
@@ -47,6 +50,7 @@ export async function GET() {
     if (!res.ok) {
       const text = await res.text();
       return Response.json({
+        config,
         hotelNights: {},
         hotelStay: { prices: [], lowest: null, lowestDate: null },
         flight: { prices: [], lowest: null, lowestDate: null },
@@ -60,6 +64,7 @@ export async function GET() {
 
     if (data.prices && !data.nights && !data.hotelNights) {
       return Response.json({
+        config,
         hotelNights: {
           "2026-10-24": {
             prices: data.prices,
@@ -80,11 +85,12 @@ export async function GET() {
     if (!data.flight) data.flight = { prices: [], lowest: null, lowestDate: null };
     if (!data.combined) data.combined = { prices: [], lowest: null, lowestDate: null };
 
-    return Response.json(data);
+    return Response.json({ ...data, config });
   } catch (error) {
     console.error("Price history error:", errorMessage(error));
     return Response.json(
       {
+        config: null,
         hotelNights: {},
         hotelStay: { prices: [], lowest: null, lowestDate: null },
         flight: { prices: [], lowest: null, lowestDate: null },

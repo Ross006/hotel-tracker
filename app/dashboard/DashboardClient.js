@@ -78,7 +78,14 @@ export default function DashboardClient() {
     lowest: history?.combined?.lowest ?? null,
     totalChecks: history?.combined?.prices?.length ?? 0,
   };
-  const recommendation = checkResult?.bookingSignal;
+  const recommendation =
+    checkResult?.bookingSignal || computeBookingSignal(combined.current, combined.lowest);
+  const flightRoute = checkResult?.flight?.route || inferFlightRoute(history?.config);
+  const lastCheckedAt =
+    history?.combined?.prices?.at?.(-1)?.date ||
+    history?.hotelStay?.prices?.at?.(-1)?.date ||
+    history?.flight?.prices?.at?.(-1)?.date ||
+    null;
 
   if (loading) return <div style={s.container}>Loading…</div>;
 
@@ -87,7 +94,21 @@ export default function DashboardClient() {
       <div style={s.header}>
         <div>
           <h1 style={s.h1}>Trip Price Dashboard</h1>
-          <p style={s.sub}>Hotel + flights for one booking decision</p>
+          <p style={s.sub}>
+            Hotel + flights in one place{flightRoute ? ` · ${flightRoute}` : ""}
+          </p>
+          {lastCheckedAt && (
+            <p style={s.lastCheck}>
+              Last checked{" "}
+              {new Date(lastCheckedAt).toLocaleString("en-GB", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </p>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <a href="/config" style={{ ...s.btn, ...s.secondary, textDecoration: "none" }}>Config</a>
@@ -141,6 +162,13 @@ export default function DashboardClient() {
         <Stat title="Flights" current={flight.current} low={flight.lowest} checks={flight.totalChecks} />
         <Stat title="Combined Trip" current={combined.current} low={combined.lowest} checks={combined.totalChecks} />
       </div>
+
+      {flight.current != null && (
+        <div style={s.flightNote}>
+          Current flight estimate: <strong>{fmt(flight.current)}</strong>
+          {flightRoute ? ` for ${flightRoute}` : ""} · best seen {fmt(flight.lowest)}
+        </div>
+      )}
 
       {timeline.length === 0 ? (
         <p style={s.empty}>No hotel history yet. Run a check to populate data.</p>
@@ -212,6 +240,41 @@ function fmt(v) {
   return v == null ? "—" : `$${Number(v).toFixed(2)}`;
 }
 
+function computeBookingSignal(current, lowest) {
+  if (current == null || lowest == null || lowest <= 0) {
+    return {
+      action: "insufficient_data",
+      label: "Need more data",
+      reason: "Run more checks to establish a stronger baseline.",
+    };
+  }
+  const deltaPct = ((current - lowest) / lowest) * 100;
+  if (deltaPct <= 2) {
+    return {
+      action: "book_now",
+      label: "Book now",
+      reason: "Current total is within 2% of the best seen trip price.",
+    };
+  }
+  if (deltaPct <= 5) {
+    return {
+      action: "consider",
+      label: "Consider booking",
+      reason: "Current total is close to your best seen trip price.",
+    };
+  }
+  return {
+    action: "wait",
+    label: "Wait",
+    reason: "Current total is still above the best seen trip price.",
+  };
+}
+
+function inferFlightRoute(config) {
+  if (!config?.flight?.origin || !config?.flight?.destination) return "";
+  return `${config.flight.origin} -> ${config.flight.destination}`;
+}
+
 const s = {
   container: {
     maxWidth: 860,
@@ -222,6 +285,7 @@ const s = {
   header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 },
   h1: { margin: 0, fontSize: "1.7rem" },
   sub: { margin: "0.25rem 0 0", color: "#666" },
+  lastCheck: { margin: "0.25rem 0 0", fontSize: "0.82rem", color: "#888" },
   btn: {
     background: "#111",
     color: "#fff",
@@ -264,6 +328,14 @@ const s = {
     borderRadius: 8,
     padding: "0.75rem 1rem",
     marginBottom: 12,
+  },
+  flightNote: {
+    marginBottom: 12,
+    color: "#4b5563",
+    fontSize: "0.88rem",
+    background: "#f9fafb",
+    borderRadius: 8,
+    padding: "0.6rem 0.9rem",
   },
   statsRow: {
     display: "grid",
