@@ -74,6 +74,7 @@ export default function DashboardClient() {
     totalChecks: history?.flight?.prices?.length ?? 0,
     details: history?.flight?.prices?.at?.(-1)?.details ?? null,
     filteredOut: 0,
+    rankedOptions: history?.flight?.prices?.at?.(-1)?.options || [],
   };
   const combined = checkResult?.combined || {
     current: history?.combined?.prices?.at?.(-1)?.price ?? null,
@@ -171,6 +172,57 @@ export default function DashboardClient() {
           {flightRoute ? ` for ${flightRoute}` : ""} · best seen {fmt(flight.lowest)}
           {flight.filteredOut ? ` · filtered out ${flight.filteredOut} options` : ""}
         </div>
+      )}
+
+      {(flight.rankedOptions?.length || 0) > 0 && (
+        <>
+          <h2 style={s.sectionTitle}>Best Flight Options Right Now</h2>
+          <table style={s.table}>
+            <thead>
+              <tr>
+                <th style={{ ...s.th, textAlign: "left" }}>Rank</th>
+                <th style={{ ...s.th, textAlign: "right" }}>Price</th>
+                <th style={{ ...s.th, textAlign: "left" }}>Carriers</th>
+                <th style={{ ...s.th, textAlign: "right" }}>Stops</th>
+                <th style={{ ...s.th, textAlign: "right" }}>Duration</th>
+                <th style={{ ...s.th, textAlign: "left" }}>Timing</th>
+                <th style={{ ...s.th, textAlign: "left" }}>Layovers</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flight.rankedOptions.map((opt) => (
+                <tr key={`rank-${opt.rank}`}>
+                  <td style={s.td}>#{opt.rank}</td>
+                  <td style={{ ...s.td, textAlign: "right", fontWeight: 700 }}>{fmt(opt.price)}</td>
+                  <td style={s.td}>{opt.details?.carriers?.join(", ") || "—"}</td>
+                  <td style={{ ...s.td, textAlign: "right" }}>{opt.details?.stopCount ?? "—"}</td>
+                  <td style={{ ...s.td, textAlign: "right" }}>{fmtMinutes(opt.details?.durationMinutes)}</td>
+                  <td style={s.td}>
+                    {opt.details?.departureTime || opt.details?.arrivalTime
+                      ? `${opt.details?.departureTime || "?"} -> ${opt.details?.arrivalTime || "?"}`
+                      : "—"}
+                  </td>
+                  <td style={s.td}>
+                    {opt.details?.layovers?.length
+                      ? opt.details.layovers
+                          .map((l) =>
+                            l.fromArrival && l.toDeparture
+                              ? `${l.airport} (${l.fromArrival} -> ${l.toDeparture}${
+                                  l.minutes != null ? `, ${fmtMinutes(l.minutes)}` : ""
+                                })`
+                              : `${l.airport}`
+                          )
+                          .join(" | ")
+                      : "Non-stop / none"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p style={s.optionHint}>
+            Ranked by value score (price + stop penalty + duration penalty), not just cheapest fare.
+          </p>
+        </>
       )}
 
       {(history?.flight?.prices?.length || 0) > 0 && (
@@ -300,6 +352,22 @@ export default function DashboardClient() {
                 ) : (
                   <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>
                     Detailed segment data unavailable for this check.
+                  </div>
+                )}
+                {(entry.options?.length || 0) > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: "0.78rem", color: "#6b7280", marginBottom: 4 }}>
+                      Top options at that check:
+                    </div>
+                    {entry.options.slice(0, 3).map((opt) => (
+                      <div key={opt.rank} style={s.optionRow}>
+                        <span>#{opt.rank}</span>
+                        <span>{fmt(opt.price)}</span>
+                        <span>{opt.details?.carriers?.join(", ") || "—"}</span>
+                        <span>{opt.details?.stopCount ?? "—"} stops</span>
+                        <span>{fmtMinutes(opt.details?.durationMinutes)}</span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </details>
@@ -529,6 +597,15 @@ const s = {
     color: "#111827",
   },
   table: { width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" },
+  optionHint: { margin: "0.45rem 0 0.9rem", color: "#6b7280", fontSize: "0.82rem" },
+  optionRow: {
+    display: "grid",
+    gridTemplateColumns: "36px 84px 1fr 90px 80px",
+    gap: 8,
+    fontSize: "0.78rem",
+    color: "#374151",
+    padding: "2px 0",
+  },
   th: {
     borderBottom: "2px solid #e5e7eb",
     padding: "0.6rem 0.65rem",
